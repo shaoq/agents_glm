@@ -707,6 +707,74 @@ Document(章节树)
 | overlap 过大 | 冗余、成本高 |
 | chunk 不带 section_path | 命中后缺上下文定位 |
 
+### 5.14 父子分块代码级实现
+
+§5.5 讲了概念与流程，这里到可运行实现，并补上概念版没展开的细节。
+
+**数据结构（具体化）**：
+
+```python
+@dataclass(frozen=True)
+class ParentChunk:
+    id: str; doc_id: str; text: str
+    page: int | tuple; heading: str; section_path: str
+
+@dataclass(frozen=True)
+class ChildChunk:
+    id: str; parent_id: str; doc_id: str; text: str
+    page: int; heading: str; section_path: str
+    version: int; status: str          # active / superseded（§2.10）
+    # embedding 只在向量库，不存对象
+```
+
+子块带 `parent_id` + `version` + `status`（呼应 §2.10 update 一致性）。
+
+**切分算法（父 → 子）**：
+
+```python
+def chunk_document(doc, parent_size, child_size, overlap):
+    parents = structural_split(doc, parent_size)              # 结构感知切父块
+    children = []
+    for parent in parents:
+        for i, sub in enumerate(sliding_split(parent.text, child_size, overlap)):
+            children.append(ChildChunk(
+                id=f"{parent.id}__{i}",                       # id 编码 parent_id
+                parent_id=parent.id, text=sub, ...,
+                version=1, status="active"))
+    return parents, children
+```
+
+**存储**：父块入 KV（不建向量索引）；子块入向量库 + BM25（metadata 带 `parent_id / version / status`）。
+
+**查询回传 + AutoMerging（代码级）**：
+
+```python
+def retrieve(query, top_k=20, merge_threshold=2):
+    child_hits = vectorstore.query(embed(query), where={"status": "active"}, n_results=top_k)
+    groups = group_by(child_hits, key=lambda c: c.metadata["parent_id"])
+    results = []
+    for parent_id, hits in groups.items():
+        if len(hits) >= merge_threshold:
+            results.append(parent_store.get(parent_id))       # 回传整个父块
+        else:
+            results.extend(hits)                              # 命中少 → 回传子块
+    return dedupe_and_rank(results)
+```
+
+AutoMerging：按 `parent_id` 聚合，命中多的父块整体回传；`merge_threshold` 调激进度。
+
+**句子窗口变体（轻量替代）**：检索 sentence chunk，回传取句 ± N，无需父块存储，但窗口固定、不能按结构切。
+
+**增删改的父子协同**（呼应 §2，概念版未展开）⭐：
+
+| 操作 | 父子协同 |
+|------|---------|
+| 新增 | 切父 → 切子，父入 KV、子入向量库 + BM25 |
+| 更新 | 新父子写入 → 旧父子**整体标 superseded** → 延迟物理删 |
+| 删除 | 按 doc_id 同时清父（KV）+ 子（向量库 + BM25） |
+
+> update 的 superseded 标记要**父子一起标**——父子是原子单元，只标一边会不一致。
+
 **核心 takeaway**：分块的本质是把文档切成「最佳检索单元」——靠**结构感知切分 + 父子分离粒度 + 评测驱动调参 + 特殊结构豁免**四件套。其中**调参方法论是最该建立的能力**：别抄参数，用评测集调。
 
 ---
@@ -1110,7 +1178,7 @@ data/raw/ (指纹 diff)
 
 ### 12.1 工程实现类待深入（代码级）
 
-- **父子分块代码级实现**：数据结构、结构感知切分算法、AutoMerging 合并、查询时父块回传（→ §5）
+- ~~父子分块代码级实现~~ ✅ 已深入回填（见 §5.14）
 - **评测体系实战**：从零搭召回测试集、recall@k、调 chunk_size / overlap 的闭环（→ §9）
 - ~~ParserRouter 降级链实现~~ ✅ 已深入回填（见 §3.9）
 - ~~表格全链路保真~~ ✅ 已深入回填（见 §3.10）
