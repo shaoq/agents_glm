@@ -1270,15 +1270,93 @@ chunk 写入向量库时附带 metadata:
 
 ---
 
-## 9. 知识库质量保障（最常被忽视）
+## 9. 知识库质量保障（最常被忽视）⭐
 
-知识库构建不是「跑一次就完」，要有评估闭环：
+知识库构建不是「跑一次就完」，要有**评估闭环**。核心是「召回测试集 + recall@k + 调参闭环」，辅以分块抽检、embedding 健康度，并与查询侧 RAGAS 互补。
 
-- **分块抽检**：人工看一批 chunk 是否语义完整、无截断
-- **召回测试集**：准备一批 query + 「应被召回的文档 / chunk」，量化召回率（recall@k）
-- **embedding 健康度**：相关 / 不相关对的相似度分布是否合理
-- **参数迭代**：chunk_size、overlap、top_k 反复调
-- 与查询侧的 **RAGAS 评估互补**：RAGAS 评「答得好不好」，召回测试评「找得准不准」
+### 9.1 评估手段全景
+
+| 手段 | 评什么 | 阶段 |
+|------|--------|------|
+| **召回测试集 + recall@k** | 检索找得准不准 | 构建（核心） |
+| 分块抽检 | chunk 语义完整否 | 构建 |
+| embedding 健康度 | 向量区分度 | 构建 |
+| 参数迭代 | 调 chunk_size / overlap / top_k | 构建 |
+| RAGAS | 端到端答得好不好 | 查询（互补） |
+
+### 9.2 召回测试集（核心）⭐
+
+```python
+EvalItem:
+    query: str                       # 查询
+    relevant_chunk_ids: set[str]     # ★ 应召回的 chunk（或 doc）id
+    query_type: 事实/对比/探索/多跳   # 分类型看召回
+```
+
+**查询来源**（呼应 §12.2.5 评测真实性）：真实日志采样（最佳）/ 从文档生成 Q-A 对（LLM 半自动，起步快）/ 专家编写（偏差大，仅冷启动）。
+
+**相关 chunk 标注**（最耗时）：对每个 query，在已索引 chunk 池里人工定位应召回的 chunk；多人标注 + 一致性检验。
+
+**规模**：冷启动 30–50 条（够调参）；成熟几百条（统计显著）。
+
+### 9.3 recall@k 计算
+
+```
+recall@k = |检索top_k ∩ 相关chunk| / |相关chunk|   （应召回的，召回了多少）
+```
+
+```python
+def eval_recall(eval_set, retriever, k):
+    recalls = []
+    for item in eval_set:
+        retrieved = retriever.retrieve(item.query, k=k)
+        hit = len(set(retrieved.ids) & item.relevant_chunk_ids)
+        recalls.append(hit / len(item.relevant_chunk_ids))
+    return mean(recalls)
+```
+
+**相关指标**：precision@k（检索中相关比例）、MRR（排名质量）。**recall@k 是调参主指标**（召回是 RAG 瓶颈）。
+
+### 9.4 调参闭环（chunk_size / overlap / top_k）⭐
+
+```
+固定评测集 → 变一个参数（如 chunk_size ∈ {256,384,512,768}）
+         → 每组建索引、跑 recall@k → 选最高且语义完整
+```
+
+**联动**（呼应 §5.6）：chunk_size ↔ top_k（块小多召回、块大少召回）；chunk_size ↔ overlap（10–20% 防边界丢失）。先单参数扫，再联合微调。
+
+**自动化**（避免手动）：参数网格脚本 + 评测 + 报表 → 选最优。
+
+### 9.5 其他评估手段
+
+- **分块抽检**：人工看一批 chunk 是否语义完整、无截断（定性）
+- **embedding 健康度**：相关 / 不相关对的相似度分布是否分离（分得开才好用）
+
+### 9.6 工具
+
+| 选项 | 适用 |
+|------|------|
+| 自建脚本（Python） | 第一版首选，灵活 |
+| RAGAS | 端到端（faithfulness / relevancy + context recall） |
+| 框架工具 | LlamaIndex / FlagEmbedding 评测模块 |
+
+### 9.7 agents_rag 落地
+
+- **第一版**：30–50 条评测集（专家编 + 日志采样）+ 自建 recall@k 脚本 + chunk_size / overlap / top_k 调参闭环
+- **进阶**：RAGAS 端到端 + 真实日志持续扩充评测集（§12.2.5）
+
+### 9.8 质量保障常见陷阱
+
+| 陷阱 | 后果 |
+|------|------|
+| 无评测集，靠感觉调参 | 玄学、不可复现 |
+| 评测集太小 | 统计不显著 |
+| 评测集偏离真实分布 | 过拟合、线上差（§12.2.5） |
+| 只看端到端、不分环节 | 定位不了问题 |
+| 相关 chunk 标注不准 | recall 算错 |
+
+**核心 takeaway**：质量保障核心是**召回测试集 + recall@k + 调参闭环**（自动化参数网格），辅以分块抽检 / embedding 健康度，端到端靠 RAGAS 互补。recall@k 是调参主指标，参数联动一起扫。
 
 ---
 
@@ -1320,7 +1398,7 @@ data/raw/ (指纹 diff)
 
 ### 12.1 剩余待办
 
-- **评测体系实战**：从零搭召回测试集、recall@k、调 chunk_size / overlap 的闭环（→ §9 质量保障）
+✅ 评测体系实战已回填 §9（召回测试集 + recall@k + 调参闭环）——当前无剩余待办。
 
 ### 12.2 多环节领域核心难点（开放问题，贯穿多环节）⭐⭐⭐
 
