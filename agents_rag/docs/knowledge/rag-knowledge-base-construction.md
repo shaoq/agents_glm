@@ -362,7 +362,83 @@ file → ParserRouter
    统一 Document(sections + blocks + 位置元数据)
 ```
 
-### 3.9 解析层常见陷阱
+### 3.9 ParserRouter 降级链的工程实现（代码级）
+
+§3.6 讲了降级链概念，这里到代码级。三个部件：**路由决策 + 质量评估 + 降级循环**。
+
+**质量评估函数（降级的判据）**——解析后算几个快信号：
+
+```python
+def assess_quality(doc) -> QualityReport:
+    return QualityReport(
+        chars_per_page=...,     # 异常低 → 可能扫描件
+        table_count=...,        # 有表格标志但无结构化表 → 漏表
+        heading_structure=...,  # 标题层级是否合理
+        garbage_ratio=...,      # 乱码 / 空白占比
+    )
+
+def is_poor(report) -> bool:
+    return report.chars_per_page < MIN or report.garbage_ratio > MAX
+```
+
+**降级循环（PDF 链为例）**——每级解析后 assess，不达标进下一级：
+
+```
+Docling → assess → 差? → MinerU → assess → 差/文本少? → RapidOCR → assess → 仍差? → 记日志跳过
+```
+
+**工程结构**：
+
+```python
+class ParserRouter:
+    def __init__(self, chain: list[Parser]):   # PDF: [Docling, MinerU, OCR]
+        self.chain = chain
+    def parse(self, file) -> Document | None:
+        for parser in self.chain:
+            try:
+                doc = parser.parse(file)
+                if not is_poor(assess_quality(doc)):
+                    return doc                # 达标 → 返回
+            except ParseError:
+                continue                      # 该 parser 失败 → 试下一个
+        log_skip(file)                        # 全军覆没 → 跳过
+        return None
+```
+
+**要点**：chain 按格式配置；每级幂等、可独立失败；评估信号要快（不算 embedding）；全部失败不抛异常，跳过 + 日志（不中断批量）。
+
+### 3.10 表格全链路保真（解析 → 分块 → 索引）
+
+表格是领域文档命门，全链路不能崩。四层都要护住：
+
+| 层 | 做法 |
+|----|------|
+| **解析** | Docling / MinerU 输出结构化表（行列矩阵 / Markdown 表），存为 typed block（`type=table`，带 `table_data`） |
+| **分块** | 表格作**原子块**，绝不内部切断；大表策略——整体保留（优先保真）或按行切但每块**重复表头** |
+| **索引** | 表格 embedding 用「表头 + 若干行」文本表示 / Markdown 渲染；元数据标 `block_type=table` |
+| **回传** | 父子分块：表格整体作父块，按行 / 语义切子块检索，命中回传**整表** |
+
+> 关键：表格的「类型化」从解析层一路透传到回传层——`type=table` 让分块豁免、让索引特殊处理、让回传渲染整表。
+
+### 3.11 跨页表格合并
+
+一个表跨多页，解析器常把每页的「表头 + 部分行」当独立表。
+
+**检测**：连续页的表格 block，且**列数相同**、上方无新标题 → 多半是同一张表的续表。优先用原生支持跨页合并的解析器（Docling / MinerU 较新版本支持）。
+
+**合并**：拼接行，**去重复表头**（第二页起的表头丢弃）；`page` 取多页范围（如 `page=[3,4]`），溯源仍准。
+
+**后处理兜底**（解析器不支持时）：
+
+```python
+def merge_adjacent_tables(blocks) -> list[Block]:
+    # 相邻 table block 列数一致 → 合并，去重复表头
+    ...
+```
+
+合并后仍是 typed table block，走 §3.10 的全链路保真。
+
+### 3.12 解析层常见陷阱
 
 | 陷阱 | 后果 |
 |------|------|
@@ -1007,9 +1083,9 @@ data/raw/ (指纹 diff)
 
 - **父子分块代码级实现**：数据结构、结构感知切分算法、AutoMerging 合并、查询时父块回传（→ §5）
 - **评测体系实战**：从零搭召回测试集、recall@k、调 chunk_size / overlap 的闭环（→ §9）
-- **ParserRouter 降级链实现**：格式路由、解析质量评估、降级（Docling → MinerU → OCR）、失败兜底（→ §3）
-- **表格全链路保真**：解析 → 分块 → 索引的表格不崩处理（→ §3 / §5）
-- **跨页表格合并**：跨页表的行列接续（→ §3）
+- ~~ParserRouter 降级链实现~~ ✅ 已深入回填（见 §3.9）
+- ~~表格全链路保真~~ ✅ 已深入回填（见 §3.10）
+- ~~跨页表格合并~~ ✅ 已深入回填（见 §3.11）
 
 ### 12.2 算法 / 技术进阶待深入
 
