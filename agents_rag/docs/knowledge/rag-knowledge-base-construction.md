@@ -189,7 +189,53 @@ doc_id = hash(content) + namespace
 | 先删后建 | 中间空窗丢数据 |
 | 删改不靠 chunk_ids | 残留 / 误删 |
 
-**核心 takeaway**：采集层的关键是**以内容指纹为身份 + 文档注册表（带 chunk_ids）为真相源 + 五态 diff + 精确动作（先建后删、多索引原子、幂等）**。这是整条增量管线正确性的根基。
+### 2.9 异常恢复：崩溃后如何收敛
+
+崩溃最棘手的是**部分写入**（写了向量库没写 BM25、或写了索引没更注册表）。靠「幂等 + 重放 + 校验」恢复，不用 2PC：
+
+```
+恢复流程（启动时）:
+1. 一致性校验（索引 ↔ 注册表）：孤儿清理、缺失重标
+2. 重新 diff（文件 vs 注册表 → 新 action list）
+3. 幂等重放（已完成的自动跳过）
+4. 继续未完成
+```
+
+**关键：写入前清残留**——每个 new/update 在写入前先按 doc_id 清理它的所有残留 chunk，部分写入崩溃后重放会「先清残留再重写」，自动收敛：
+
+```python
+def apply_new_or_update(doc):
+    delete_chunks_by_doc(doc.doc_id)   # 先清残留（即使旧的不完整）
+    chunks = pipeline(doc)
+    write_all_indexes(chunks)
+    registry.upsert(doc.doc_id, ...)
+```
+
+加速：操作日志（WAL）+ checkpoint 定位进度。向量库 / BM25 是异构存储，跨存储事务难做真 2PC，用「幂等 + 重放 + 校验」等价达成最终一致性。
+
+> 本质：action 幂等 + 注册表为真相源 → 恢复 = 校验 + 重新 diff + 重放，崩溃重跑一遍就一致。
+
+### 2.10 update 中间态一致性：新旧并存如何不脏读 ⭐
+
+「先建新后删旧」的窗口期，索引里新旧共存，查询会召回重复。**解法：把「删旧」从物理删除改成「逻辑标记 + 查询过滤」**——旧 chunk 标 `superseded`，查询过滤 `status=active`，物理删除延后：
+
+```
+update 流程:
+1. 新 chunk 写入        metadata: {version: N+1, status: active}
+2. 旧 chunk 标记取代    metadata: {status: superseded}   # 不物理删
+3. 查询 where status=active → 只看到新
+4. 延迟批量物理删除     superseded 的旧 chunk
+```
+
+**chunk 元数据需补 `version` + `status`（active / superseded）两个字段**——既是 update 一致性的基础，也强化崩溃恢复。复用 §7.4 的 metadata 过滤，零额外机制：
+
+```python
+collection.query(query_vec, where={"status": "active"}, n_results=k)
+```
+
+> 等价方案：注册表记 doc 的 current_version，查询只召回该版本（蓝绿切换）。agents_rag 用 status 方案（chunk 级、复用过滤）。
+
+**核心 takeaway**：采集层的关键是**以内容指纹为身份 + 文档注册表（带 chunk_ids）为真相源 + 五态 diff + 精确动作（先建后删、多索引原子、幂等）+ 异常恢复（幂等重放）+ 中间态隔离（status 过滤）**。这是整条增量管线正确性的根基。
 
 ---
 
