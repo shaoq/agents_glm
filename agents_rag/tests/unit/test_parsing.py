@@ -106,6 +106,17 @@ def test_assess_quality_poor_for_scan_like():
     assert assess_quality(doc).is_poor()  # 每页字符极少
 
 
+def test_poor_reason_diagnosis():
+    from agents_rag.models import QualityReport
+
+    assert QualityReport(chars_per_page=5).poor_reason() == "scan"  # 极低
+    assert QualityReport(chars_per_page=200, garbage_ratio=0.5).poor_reason() == "layout"
+    assert QualityReport(chars_per_page=200, garbage_ratio=0.1).poor_reason() is None
+    # scan 阈值严：chars=30 是 is_poor 但非 poor_reason（不降级）
+    assert QualityReport(chars_per_page=30).is_poor()
+    assert QualityReport(chars_per_page=30).poor_reason() is None
+
+
 # —— normalizer ——
 def test_normalizer_preserves_page_metadata():
     b = Block(type=BlockType.PARAGRAPH, text="你好　　世界", page=3)  # 全角双空格
@@ -126,7 +137,7 @@ def test_clean_text_keeps_symbols():
     assert "1.0" in clean_text("型号 A-1.0 编码")
 
 
-# —— router ——
+# —— router（诊断式）——
 class _BoomParser(Parser):
     supported_types = (DocType.TXT,)
 
@@ -134,27 +145,69 @@ class _BoomParser(Parser):
         raise RuntimeError("boom")
 
 
-def test_router_all_fail_returns_none(tmp_path):
-    f = tmp_path / "a.txt"
-    f.write_text("hi")
-    router = ParserRouter({DocType.TXT: [_BoomParser(), _BoomParser()]})
-    assert router.parse(f) is None  # 全失败/异常 → 跳过
+class _FakeParser(Parser):
+    """产出指定 Document，用于控制 poor_reason。"""
+
+    def __init__(self, doc: Document):
+        self._doc = doc
+
+    def parse(self, path):  # type: ignore[override]
+        return self._doc
+
+
+def _txt_doc(text: str, page: int | None = None) -> Document:
+    return Document(
+        doc_id="", source="s", doc_type=DocType.TXT,
+        sections=(Section(blocks=(Block(text=text, page=page),)),),
+    )
+
+
+def test_router_primary_ok(tmp_path):
+    f = tmp_path / "a.txt"; f.write_text("x")
+    ok = _txt_doc("正常文本内容足够长不至于被判低质量" * 5)
+    router = ParserRouter(primary={DocType.TXT: _FakeParser(ok)})
+    assert router.parse(f) is ok  # 达标 → 返回主 doc
+
+
+def test_router_primary_fail_returns_none(tmp_path):
+    f = tmp_path / "a.txt"; f.write_text("x")
+    router = ParserRouter(primary={DocType.TXT: _BoomParser()})
+    assert router.parse(f) is None  # 主 raise → None
 
 
 def test_router_no_parser_for_type(tmp_path):
-    f = tmp_path / "a.xyz"
-    f.write_text("hi")
-    router = ParserRouter({})
+    f = tmp_path / "a.xyz"; f.write_text("x")
+    router = ParserRouter(primary={})
     assert router.parse(f) is None
 
 
-def test_router_falls_through_to_good_parser(tmp_path):
-    f = tmp_path / "a.txt"
-    f.write_text("正常文本内容足够长不至于被判低质量" * 5)
-    good = MarkdownParser()
-    router = ParserRouter({DocType.TXT: [_BoomParser(), good]})
-    doc = router.parse(f)
-    assert doc is not None
+def test_router_poor_scan_falls_back(tmp_path):
+    f = tmp_path / "a.txt"; f.write_text("x")
+    scan_doc = _txt_doc("ab", page=1)  # chars/page=2 < 10 → scan
+    ok_doc = _txt_doc("OCR 识别出的足够长正文内容" * 5)
+    router = ParserRouter(
+        primary={DocType.TXT: _FakeParser(scan_doc)},
+        fallbacks={DocType.TXT: {"scan": _FakeParser(ok_doc)}},
+    )
+    assert router.parse(f) is ok_doc  # scan → OCR fallback
+
+
+def test_router_poor_no_fallback_skip(tmp_path):
+    f = tmp_path / "a.txt"; f.write_text("x")
+    scan_doc = _txt_doc("ab", page=1)  # scan poor
+    router = ParserRouter(primary={DocType.TXT: _FakeParser(scan_doc)})
+    assert router.parse(f) is None  # poor + 无兜底 → None
+
+
+def test_router_poor_fallback_still_poor_skip(tmp_path):
+    f = tmp_path / "a.txt"; f.write_text("x")
+    scan_doc = _txt_doc("ab", page=1)
+    bad_fb = _txt_doc("xy", page=1)  # 兜底也 poor
+    router = ParserRouter(
+        primary={DocType.TXT: _FakeParser(scan_doc)},
+        fallbacks={DocType.TXT: {"scan": _FakeParser(bad_fb)}},
+    )
+    assert router.parse(f) is None  # 兜底仍 poor → None
 
 
 def test_xlsx_parser(tmp_path):
@@ -190,5 +243,5 @@ def test_pptx_parser(tmp_path):
 
 def test_router_with_defaults_disables_pdf():
     r = ParserRouter.with_defaults(enable_pdf=False)
-    assert DocType.MARKDOWN in r._parsers
-    assert DocType.PDF not in r._parsers  # docling 未启用
+    assert DocType.MARKDOWN in r._primary
+    assert DocType.PDF not in r._primary  # docling 未启用
