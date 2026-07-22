@@ -173,6 +173,27 @@ class QualityReport(BaseModel):
             return True
         return False
 
+    def poor_reason(
+        self,
+        *,
+        scan_threshold: float = 10.0,
+        max_garbage_ratio: float = 0.3,
+    ) -> str | None:
+        """诊断 poor 原因，用于诊断式降级路由。
+
+        - ``scan``：chars_per_page 极低（docling 内置 OCR 也失败 → 独立 OCR）
+        - ``layout``：garbage_ratio 高 / 结构乱（版面崩 → MinerU）
+        - ``None``：达标
+
+        scan 阈值（10）比 is_poor（50）更严——普通扫描件 docling 内置 OCR 已处理，
+        仅 docling OCR 也失败（几乎无字）才走独立 OCR。
+        """
+        if self.chars_per_page < scan_threshold:
+            return "scan"
+        if self.garbage_ratio > max_garbage_ratio:
+            return "layout"
+        return None
+
 
 # —— 文档注册表记录（笔记 §2.3，sqlite 持久化的真相源）——
 class DocumentRecord(BaseModel):
