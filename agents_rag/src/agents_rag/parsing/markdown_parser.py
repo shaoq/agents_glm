@@ -1,4 +1,8 @@
-"""Markdown 解析：标题层级 → sections。天然结构化，最省心。笔记 §3.3。"""
+"""Markdown 解析：标题层级 → 嵌套 sections。笔记 §3.3。
+
+按 ``#`` 层级产出扁平 ``SectionNode``（同一标题下的段落 / 表格聚合进该节点 blocks），
+再由 ``build_nested_sections`` 组织成嵌套 frozen 树。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ from pathlib import Path
 
 from agents_rag.models import Block, BlockType, Document, DocType, Section
 from agents_rag.parsing.base import Parser
+from agents_rag.parsing.tree import SectionNode, build_nested_sections
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 # markdown 表格行（含分隔行）
@@ -14,45 +19,44 @@ _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 
 
 def md_to_sections(text: str) -> list[Section]:
-    """按 ``#`` 标题切分；表格行聚合成 table block，其余聚合成 paragraph block。"""
-    sections: list[Section] = []
-    cur_heading: str | None = None
-    cur_level = 1
+    """按 ``#`` 标题层级产出嵌套 sections；表格聚合为 table block，段落聚合为 paragraph block。"""
+    nodes: list[SectionNode] = []
+    cur: SectionNode | None = None
     para_lines: list[str] = []
     table_lines: list[str] = []
 
-    def flush_table() -> None:
-        if table_lines:
-            md = "\n".join(table_lines)
-            sections.append(
-                Section(
-                    heading=cur_heading,
-                    level=cur_level,
-                    blocks=(Block(type=BlockType.TABLE, text=md, table_data={"markdown": md}),),
-                )
-            )
-            table_lines.clear()
+    def ensure_cur() -> SectionNode:
+        """标题前的内容归到一个无标题 section（level=1）。"""
+        nonlocal cur
+        if cur is None:
+            cur = SectionNode(level=1, heading=None)
+            nodes.append(cur)
+        return cur
 
     def flush_para() -> None:
+        nonlocal para_lines
         if para_lines:
             body = "\n".join(para_lines).strip()
             if body:
-                sections.append(
-                    Section(
-                        heading=cur_heading,
-                        level=cur_level,
-                        blocks=(Block(type=BlockType.PARAGRAPH, text=body),),
-                    )
-                )
-            para_lines.clear()
+                ensure_cur().blocks.append(Block(type=BlockType.PARAGRAPH, text=body))
+            para_lines = []
+
+    def flush_table() -> None:
+        nonlocal table_lines
+        if table_lines:
+            md = "\n".join(table_lines)
+            ensure_cur().blocks.append(
+                Block(type=BlockType.TABLE, text=md, table_data={"markdown": md})
+            )
+            table_lines = []
 
     for line in text.splitlines():
         m = _HEADING.match(line)
         if m:
             flush_para()
             flush_table()
-            cur_level = len(m.group(1))
-            cur_heading = m.group(2).strip()
+            cur = SectionNode(level=len(m.group(1)), heading=m.group(2).strip())
+            nodes.append(cur)
             continue
         if _TABLE_ROW.match(line):
             flush_para()
@@ -64,16 +68,17 @@ def md_to_sections(text: str) -> list[Section]:
     flush_para()
     flush_table()
 
-    if not sections:
+    if not nodes:
         body = text.strip()
-        sections.append(
-            Section(
-                heading=None,
+        nodes.append(
+            SectionNode(
                 level=1,
-                blocks=(Block(type=BlockType.PARAGRAPH, text=body),) if body else (),
+                heading=None,
+                blocks=[Block(type=BlockType.PARAGRAPH, text=body)] if body else [],
             )
         )
-    return sections
+
+    return build_nested_sections(nodes)
 
 
 class MarkdownParser(Parser):

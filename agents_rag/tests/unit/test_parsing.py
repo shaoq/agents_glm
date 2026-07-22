@@ -18,14 +18,36 @@ from agents_rag.parsing.router import ParserRouter
 def test_markdown_headings_levels():
     sections = md_to_sections("# H1\na\n\n## H2\nb\n")
     assert sections[0].heading == "H1" and sections[0].level == 1
-    assert sections[1].heading == "H2" and sections[1].level == 2
+    assert sections[0].children[0].heading == "H2"
+    assert sections[0].children[0].level == 2
 
 
 def test_markdown_table_block():
     md = "# T\n| a | b |\n|---|---|\n| 1 | 2 |\n"
-    sections = md_to_sections(md)
-    tables = [s for s in sections if s.blocks and s.blocks[0].type is BlockType.TABLE]
-    assert tables and "a" in tables[0].blocks[0].text
+    doc = Document(
+        doc_id="", source="s", doc_type=DocType.MARKDOWN, sections=tuple(md_to_sections(md))
+    )
+    tables = [b for b in doc.iter_blocks() if b.type is BlockType.TABLE]
+    assert tables and "a" in tables[0].text
+
+
+def test_markdown_multilevel_section_path():
+    from agents_rag.chunking.structural import split_parents
+
+    md = (
+        "# H1\n" + "正文一" * 30 + "\n\n"
+        "## H2\n" + "正文二" * 30 + "\n\n"
+        "### H3\n" + "正文三" * 30 + "\n"
+    )
+    doc = Document(
+        doc_id="d", source="s", doc_type=DocType.MARKDOWN, sections=tuple(md_to_sections(md))
+    )
+    parents = split_parents(doc, parent_max_size=100000)
+    paths = {p.section_path for p in parents}
+    assert any("H1" in p for p in paths)
+    assert any("H2" in p for p in paths)
+    assert any("H3" in p for p in paths)
+    assert "H1 > H2 > H3" in paths  # 完整层级路径
 
 
 def test_markdown_parser_document(tmp_path):

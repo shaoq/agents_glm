@@ -1,5 +1,6 @@
-"""PDF 解析：docling（第三代文档理解模型）→ sections + 表格 block + page。
+"""PDF 解析：docling（第三代文档理解模型）→ 嵌套 sections + 表格 block + page。
 
+按 item level 构建 ``SectionNode`` 列表，再由 ``build_nested_sections`` 组织成嵌套树。
 笔记 §3.2：PDF 是解析主战场，docling 表格 / 版面结构化强。
 """
 
@@ -8,8 +9,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from agents_rag.models import Block, BlockType, Document, DocType, Section
+from agents_rag.models import Block, BlockType, Document, DocType
 from agents_rag.parsing.base import Parser
+from agents_rag.parsing.tree import SectionNode, build_nested_sections
 
 log = logging.getLogger(__name__)
 
@@ -29,18 +31,8 @@ class DoclingParser(Parser):
         result = self._conv.convert(str(path))
         doc = result.document
 
-        sections: list[Section] = []
-        cur_heading: str | None = None
-        cur_level = 1
-        cur_blocks: list[Block] = []
-
-        def flush() -> None:
-            nonlocal cur_blocks
-            if cur_heading is not None or cur_blocks:
-                sections.append(
-                    Section(heading=cur_heading, level=cur_level, blocks=tuple(cur_blocks))
-                )
-                cur_blocks = []
+        nodes: list[SectionNode] = []
+        cur: SectionNode | None = None
 
         for item, level in doc.iterate_items():
             label = str(getattr(item, "label", "")).lower()
@@ -48,14 +40,20 @@ class DoclingParser(Parser):
                 continue
             page = _page_of(item)
             if label in _HEADING_LABELS:
-                flush()
-                cur_heading = (getattr(item, "text", "") or "").strip() or None
-                cur_level = max(1, level)
+                cur = SectionNode(
+                    level=max(1, level),
+                    heading=(getattr(item, "text", "") or "").strip() or None,
+                )
+                nodes.append(cur)
                 continue
+            # 非标题内容：归到当前 section（标题前内容归无标题 section）
+            if cur is None:
+                cur = SectionNode(level=1, heading=None)
+                nodes.append(cur)
             if label == "table":
                 md = _table_markdown(item, doc)
                 if md:
-                    cur_blocks.append(
+                    cur.blocks.append(
                         Block(
                             type=BlockType.TABLE,
                             text=md,
@@ -66,11 +64,12 @@ class DoclingParser(Parser):
                 continue
             txt = (getattr(item, "text", "") or "").strip()
             if txt:
-                cur_blocks.append(Block(type=BlockType.PARAGRAPH, text=txt, page=page))
+                cur.blocks.append(Block(type=BlockType.PARAGRAPH, text=txt, page=page))
 
-        flush()
-        if not sections:
-            sections.append(Section(heading=None, level=1, blocks=()))
+        if not nodes:
+            nodes.append(SectionNode(level=1, heading=None))
+
+        sections = build_nested_sections(nodes)
         return Document(
             doc_id="",
             source=str(path),
