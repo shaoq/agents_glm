@@ -20,7 +20,7 @@ from agents_rag.pipeline.ingest import IngestPipeline
 class _FakeVision:
     model = "fake"
 
-    def describe(self, image_bytes, *, content_hash, cache=None, caption=None):
+    def describe(self, image_bytes, *, content_hash, fmt="png", cache=None, caption=None):
         return f"图片描述:{content_hash[:6]}"
 
 
@@ -65,10 +65,11 @@ def test_process_images_fills_description_and_stores_original(tmp_path):
     # 描述已填、image_ref 已设、image_data 已清
     assert block.text.startswith("图片描述:")
     assert block.image_ref is not None
+    assert block.image_ref.endswith(".png")  # 含扩展名
     assert block.image_data is None
     # 原图已存 + ImageRecord 记录
     assert pipe.image_store.get("d1", block.image_ref) == img_data
-    rec = pipe.image_store.get_record(block.image_ref)
+    rec = pipe.image_store.get_record(image_content_hash(img_data))  # get_record 用 image_id(=hash)，非 image_ref
     assert rec.description.startswith("图片描述:") and rec.caption == "图注"
     # 注：描述缓存的查/写是 ZhipuVisionDescriber 内部行为（FakeVision 不模拟），
     # 已由 test_vision_describer.py 覆盖；此处只验 ImageRecord + 原图存储

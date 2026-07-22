@@ -26,7 +26,7 @@ from agents_rag.ingestion.registry import DocumentRegistry
 from agents_rag.indexing.bm25_index import BM25Index
 from agents_rag.indexing.cache import EmbeddingCache
 from agents_rag.indexing.embedder import Embedder
-from agents_rag.indexing.image_store import ImageStore, image_content_hash
+from agents_rag.indexing.image_store import ImageStore, detect_format, image_content_hash
 from agents_rag.indexing.parent_store import ParentStore
 from agents_rag.indexing.vectorstore import VectorStore
 from agents_rag.indexing.vision_describer import ImageDescriptionCache, ZhipuVisionDescriber
@@ -159,29 +159,33 @@ class IngestPipeline:
             return b
         data = b.image_data
         content_hash = image_content_hash(data)
+        fmt = detect_format(data)
         # 图片级增量：content_hash 已存在则复用既有描述
         existing = self.image_store.find_by_hash(content_hash)
         if existing is not None:
+            image_ref = f"{existing.image_id}.{existing.format}"
             return b.model_copy(
-                update={"text": existing.description, "image_ref": existing.image_id, "image_data": None}
+                update={"text": existing.description, "image_ref": image_ref, "image_data": None}
             )
-        image_id = self.image_store.put(data, doc_id)
+        image_ref = self.image_store.put(data, doc_id, fmt)
         description = self.vision_describer.describe(
-            data, content_hash=content_hash, cache=self.description_cache, caption=b.caption
+            data, content_hash=content_hash, fmt=fmt,
+            cache=self.description_cache, caption=b.caption,
         )
         self.image_store.upsert_record(
             ImageRecord(
-                image_id=image_id,
+                image_id=content_hash,
                 doc_id=doc_id,
-                source_path=str(self.image_store.path_of(doc_id, image_id)),
+                source_path=str(self.image_store.path_of(doc_id, image_ref)),
                 page=b.page,
                 caption=b.caption,
                 description=description,
+                format=fmt,
                 content_hash=content_hash,
             )
         )
         return b.model_copy(
-            update={"text": description, "image_ref": image_id, "image_data": None}
+            update={"text": description, "image_ref": image_ref, "image_data": None}
         )
 
     def _apply_delete(self, action: Action) -> None:

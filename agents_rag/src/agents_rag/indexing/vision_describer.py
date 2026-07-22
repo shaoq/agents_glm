@@ -98,6 +98,7 @@ class ZhipuVisionDescriber:
         image_bytes: bytes,
         *,
         content_hash: str,
+        fmt: str = "png",
         cache: ImageDescriptionCache | None = None,
         caption: str | None = None,
     ) -> str:
@@ -107,7 +108,7 @@ class ZhipuVisionDescriber:
             if cached:
                 return cached
         try:
-            desc = self._call_api(image_bytes, caption)
+            desc = self._call_api(image_bytes, fmt, caption)
         except Exception as e:  # noqa: BLE001 — 描述失败降级到 caption
             log.warning("图片描述生成失败，用 caption 兜底: %s", e)
             return (caption or "").strip()
@@ -115,8 +116,9 @@ class ZhipuVisionDescriber:
             cache.put(content_hash, self._model, desc)
         return desc
 
-    def _call_api(self, image_bytes: bytes, caption: str | None) -> str:
+    def _call_api(self, image_bytes: bytes, fmt: str, caption: str | None) -> str:
         b64 = base64.b64encode(image_bytes).decode("ascii")
+        mime = f"image/{fmt}"
         prompt = _DESCRIBE_PROMPT + (f"\n图注：{caption}" if caption else "")
 
         @retry(
@@ -136,7 +138,7 @@ class ZhipuVisionDescriber:
                                 {"type": "text", "text": prompt},
                                 {
                                     "type": "image_url",
-                                    "image_url": {"url": f"data:image/png;base64,{b64}"},
+                                    "image_url": {"url": f"data:{mime};base64,{b64}"},
                                 },
                             ],
                         }

@@ -226,9 +226,10 @@ class ImageRecord(BaseModel):
 
     image_id: str  # = content_hash（图片身份）
     doc_id: str
-    source_path: str  # 原图存储路径
+    source_path: str  # 原图存储路径（含扩展名）
     page: int | None = None
     caption: str | None = None
     description: str = ""
+    format: str = "png"  # 图片格式（mime: image/{format}）
     content_hash: str
     created_at: datetime = Field(default_factory=_utcnow)
