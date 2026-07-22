@@ -58,7 +58,6 @@ storage/
 *.log
 logs/
 
-# AI 工具 / 工作目录（工具自动生成，不入业务仓库）
+# AI 工具工作目录（工具自动生成，不入业务仓库）
 .claude/
 .codex/
-openspec/
