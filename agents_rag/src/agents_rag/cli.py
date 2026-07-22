@@ -1,0 +1,89 @@
+"""CLI 入口（Typer）：``agents-rag ingest <dir>``。
+
+Rich 输出五态统计 + 索引规模 + 失败日志。
+"""
+
+from __future__ import annotations
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from agents_rag.chunking.parent_child import StructuralChunker
+from agents_rag.cleaning.normalizer import Normalizer
+from agents_rag.config import settings
+from agents_rag.ingestion.registry import DocumentRegistry
+from agents_rag.indexing.bm25_index import BM25Index
+from agents_rag.indexing.cache import EmbeddingCache
+from agents_rag.indexing.chroma_store import ChromaStore
+from agents_rag.indexing.embedder import ZhipuEmbedder
+from agents_rag.indexing.parent_store import ParentStore
+from agents_rag.parsing.router import ParserRouter
+from agents_rag.pipeline.ingest import IngestPipeline, IngestReport
+
+app = typer.Typer(help="agents_rag 知识构建（索引管线）CLI")
+console = Console()
+
+
+@app.callback()
+def _main() -> None:
+    """agents_rag 知识构建（索引管线）CLI。"""
+
+
+@app.command()
+def ingest(
+    directory: str = typer.Argument(..., help="待索引的文档目录"),
+    no_pdf: bool = typer.Option(False, "--no-pdf", help="禁用 PDF(docling) 解析"),
+) -> None:
+    """扫描目录并构建/更新知识库索引（五态增量）。"""
+    settings.ensure_storage_dirs()
+    api_key = settings.require_api_key()  # 缺失 fail-fast
+
+    bm25_path = settings.bm25_path
+    bm25 = BM25Index.load(bm25_path) if bm25_path.exists() else BM25Index()
+
+    with (
+        DocumentRegistry(settings.registry_path) as registry,
+        EmbeddingCache(settings.embedding_cache_path) as cache,
+    ):
+        pipe = IngestPipeline(
+            registry=registry,
+            router=ParserRouter.with_defaults(enable_pdf=not no_pdf),
+            normalizer=Normalizer(),
+            chunker=StructuralChunker(
+                parent_max_size=settings.parent_max_size,
+                chunk_size=settings.chunk_size,
+                overlap=settings.chunk_overlap,
+            ),
+            embedder=ZhipuEmbedder(
+                api_key=api_key,
+                model=settings.embedding_model,
+                dim=settings.embedding_dim,
+                max_batch=settings.embedding_max_batch,
+                max_concurrency=settings.embedding_max_concurrency,
+            ),
+            cache=cache,
+            vector_store=ChromaStore(settings.chroma_dir),
+            bm25=bm25,
+            parent_store=ParentStore(settings.parents_dir),
+        )
+        report = pipe.run(directory)
+        bm25.save(bm25_path)
+
+    _print_report(report)
+
+
+def _print_report(report: IngestReport) -> None:
+    console.print(f"[bold green]索引完成[/] · 子块总数 {report.indexed_chunks}")
+    table = Table("状态", "数量")
+    for kind in ("new", "update", "delete", "move"):
+        table.add_row(kind, str(report.counts.get(kind, 0)))
+    table.add_row("skip", str(report.counts.get("skipped", 0)))
+    table.add_row("[red]failed", str(report.counts.get("failed", 0)))
+    console.print(table)
+    for doc_id, err in report.failed:
+        console.print(f"  [red]{doc_id}[/]: {err}")
+
+
+if __name__ == "__main__":
+    app()
