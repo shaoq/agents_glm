@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agents-rag"
+version = "0.1.0"
+description = "agents_rag 知识构建（索引管线）核心闭环：多格式解析 + 父子分块 + 双索引 + 五态增量"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "zhipuai>=2",
+    "chromadb>=0.5",
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42",
+    "docling>=2",
+    "python-docx>=1",
+    "openpyxl>=3",
+    "python-pptx>=0.6",
+    "trafilatura>=1.12",
+    "beautifulsoup4>=4.12",
+    "lxml>=5",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "typer>=0.12",
+    "rich>=13",
+    "tenacity>=8",
+    "sniffio>=1.3",  # zhipuai/httpx 传递依赖，显式声明避免缺失
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "reportlab>=5",  # 生成 tests/fixtures PDF（中文用内置 CID 字体）
+]
+
+[project.scripts]
+agents-rag = "agents_rag.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agents_rag"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
