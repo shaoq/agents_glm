@@ -17,7 +17,9 @@ from agents_rag.indexing.bm25_index import BM25Index
 from agents_rag.indexing.cache import EmbeddingCache
 from agents_rag.indexing.chroma_store import ChromaStore
 from agents_rag.indexing.embedder import ZhipuEmbedder
+from agents_rag.indexing.image_store import ImageStore
 from agents_rag.indexing.parent_store import ParentStore
+from agents_rag.indexing.vision_describer import ImageDescriptionCache, ZhipuVisionDescriber
 from agents_rag.parsing.router import ParserRouter
 from agents_rag.pipeline.ingest import IngestPipeline, IngestReport
 
@@ -45,6 +47,8 @@ def ingest(
     with (
         DocumentRegistry(settings.registry_path) as registry,
         EmbeddingCache(settings.embedding_cache_path) as cache,
+        ImageStore(settings.images_dir) as image_store,
+        ImageDescriptionCache(settings.storage_dir / "image_descriptions.sqlite") as desc_cache,
     ):
         pipe = IngestPipeline(
             registry=registry,
@@ -66,6 +70,9 @@ def ingest(
             vector_store=ChromaStore(settings.chroma_dir),
             bm25=bm25,
             parent_store=ParentStore(settings.parents_dir),
+            image_store=image_store,
+            vision_describer=ZhipuVisionDescriber(api_key=api_key, model=settings.vision_model),
+            description_cache=desc_cache,
         )
         report = pipe.run(directory)
         bm25.save(bm25_path)

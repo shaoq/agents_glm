@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from agents_rag.models import BlockType, Document, ParentChunk
 
-_ATOMIC = {BlockType.TABLE, BlockType.CODE, BlockType.LIST}
+_ATOMIC = {BlockType.TABLE, BlockType.CODE, BlockType.LIST, BlockType.IMAGE}
 
 
 def split_parents(doc: Document, *, parent_max_size: int) -> list[ParentChunk]:
@@ -28,6 +28,7 @@ def split_parents(doc: Document, *, parent_max_size: int) -> list[ParentChunk]:
         heading: str | None,
         path: str,
         bt: BlockType,
+        image_ref: str | None = None,
     ) -> None:
         nonlocal idx
         text = text.strip()
@@ -42,6 +43,7 @@ def split_parents(doc: Document, *, parent_max_size: int) -> list[ParentChunk]:
                 heading=heading,
                 section_path=path,
                 block_type=bt,
+                image_ref=image_ref,
             )
         )
         idx += 1
@@ -73,7 +75,7 @@ def split_parents(doc: Document, *, parent_max_size: int) -> list[ParentChunk]:
                     continue
                 if b.type in _ATOMIC:
                     flush()
-                    emit(b.text, b.page, sec.heading, path, b.type)
+                    emit(b.text, b.page, sec.heading, path, b.type, image_ref=b.image_ref)
                     continue
                 if buf and buf_len() + len(b.text) > parent_max_size:
                     flush()

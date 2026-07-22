@@ -28,6 +28,7 @@ class BlockType(str, Enum):
     TABLE = "table"
     LIST = "list"
     CODE = "code"
+    IMAGE = "image"
 
 
 class DocType(str, Enum):
@@ -68,6 +69,11 @@ class Block(BaseModel):
     bbox: tuple[float, ...] | None = None
     # type=table 时：{"rows": [[...], ...]} 或 {"markdown": "..."}
     table_data: dict[str, Any] | None = None
+    # type=image 时：image_ref 关联原图；caption 为图注；image_data 为解析层临时字段
+    # （pipeline 存盘 + 生成描述后清空，不进向量库 metadata）
+    image_ref: str | None = None
+    caption: str | None = None
+    image_data: bytes | None = None
 
 
 class Section(BaseModel):
@@ -109,6 +115,7 @@ class ParentChunk(BaseModel):
     heading: str | None = None
     section_path: str = ""
     block_type: BlockType = BlockType.PARAGRAPH  # 表格/代码作原子父块（豁免切断）
+    image_ref: str | None = None  # type=image 时关联原图
 
 
 class ChildChunk(BaseModel):
@@ -125,6 +132,7 @@ class ChildChunk(BaseModel):
     char_span: tuple[int, int] = (0, 0)
     version: int = 1
     status: ChunkStatus = ChunkStatus.ACTIVE
+    image_ref: str | None = None  # type=image 时关联原图（chunk 级，供查询侧回传）
 
     def metadata_dict(self) -> dict[str, Any]:
         """供向量库 metadata 存储（Chroma metadata 值须为基础类型）。"""
@@ -139,6 +147,7 @@ class ChildChunk(BaseModel):
             "status": self.status.value,
             "char_start": self.char_span[0],
             "char_end": self.char_span[1],
+            "image_ref": self.image_ref or "",
         }
 
 
@@ -209,3 +218,17 @@ class Action(BaseModel):
     namespace: str = "local"
     content_size: int = 0
     old_record: DocumentRecord | None = None
+
+
+# —— 图片注册表记录（笔记 §12.1.1，原图存储 + 描述缓存增量）——
+class ImageRecord(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    image_id: str  # = content_hash（图片身份）
+    doc_id: str
+    source_path: str  # 原图存储路径
+    page: int | None = None
+    caption: str | None = None
+    description: str = ""
+    content_hash: str
+    created_at: datetime = Field(default_factory=_utcnow)

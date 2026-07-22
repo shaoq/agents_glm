@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     embedding_max_batch: int = 64
     embedding_max_concurrency: int = 8
 
+    # 视觉（图片描述生成，智谱 GLM-V 系列）
+    vision_model: str = "glm-4.5v"
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64
@@ -51,6 +54,10 @@ class Settings(BaseSettings):
     @property
     def parents_dir(self) -> Path:
         return self.storage_dir / "parents"
+
+    @property
+    def images_dir(self) -> Path:
+        return self.storage_dir / "images"
 
     @property
     def embedding_cache_path(self) -> Path:
@@ -78,6 +85,7 @@ class Settings(BaseSettings):
             self.storage_dir,
             self.chroma_dir,
             self.parents_dir,
+            self.images_dir,
             self.data_dir,
             self.raw_dir,
         ):

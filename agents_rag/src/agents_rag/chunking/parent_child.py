@@ -50,6 +50,7 @@ def _child(
         section_path=parent.section_path,
         block_type=bt,
         char_span=(start, end),
+        image_ref=parent.image_ref,
     )
 
 
