@@ -20,13 +20,13 @@ def test_derived_paths():
 
 
 def test_require_api_key_failfast_when_empty():
-    s = Settings(zhipuai_api_key="")
+    s = Settings(llm_api_key="")
     with pytest.raises(RuntimeError):
         s.require_api_key()
 
 
 def test_require_api_key_returns_when_set():
-    s = Settings(zhipuai_api_key="sk-test")
+    s = Settings(llm_api_key="sk-test")
     assert s.require_api_key() == "sk-test"
 
 

@@ -2,7 +2,7 @@
 
 面向领域 / 企业文档问答的 RAG 工程 —— **知识构建（索引管线）核心闭环**。
 
-把一批多格式文档（PDF / Markdown / HTML / Office）转成可检索、可溯源、支持增量维护的语义索引：高质量解析 → 结构感知父子分块 → 智谱 embedding + BM25 双索引 → 内容指纹五态增量。
+把一批多格式文档（PDF / Markdown / HTML / Office）转成可检索、可溯源、支持增量维护的语义索引：高质量解析 → 结构感知父子分块 → embedding + BM25 双索引 → 内容指纹五态增量。
 
 > 设计与原理见 `docs/specs/` 与 `docs/knowledge/`；变更管理见根目录 `openspec/changes/add-knowledge-base-core/`。
 
@@ -23,11 +23,11 @@
 
 | 用途 | 模型 | 状态 |
 |------|------|------|
-| Embedding（向量化） | 智谱 **embedding-3**（2048 维） | ✅ 本轮实际调用 |
-| LLM（生成） | 智谱 GLM-4.5 | ⏳ 查询侧，待实现 |
-| Rerank（重排） | 智谱 rerank-2 | ⏳ 查询侧，待实现 |
+| Embedding（向量化） | **embedding-3**（2048 维，默认智谱） | ✅ 本轮实际调用 |
+| LLM（生成） | GLM-4.5（默认智谱） | ⏳ 查询侧，待实现 |
+| Rerank（重排） | rerank-2（默认智谱） | ⏳ 查询侧，待实现 |
 
-知识构建这条线**只用到 embedding-3**（文档切块向量化）；LLM / Rerank 属查询管线，本轮未实现。SDK：`zhipuai`（OpenAI 兼容接口）。
+知识构建这条线**只用到 embedding-3**（文档切块向量化）；LLM / Rerank 属查询管线，本轮未实现。底层走 **OpenAI 兼容协议**（`openai` SDK），默认连智谱 BigModel；切换平台改 `.env` 的 `LLM_BASE_URL` + 模型名即可。
 
 ## 环境
 
@@ -44,7 +44,7 @@ pip install -e .[dev]        # 含 dev：pytest / ruff / reportlab
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少设置 ZHIPUAI_API_KEY
+# 编辑 .env，至少设置 LLM_API_KEY（默认连智谱；换平台改 LLM_BASE_URL）
 ```
 
 密钥缺失时 `ingest` 命令 fail-fast。
@@ -53,6 +53,8 @@ cp .env.example .env
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
+| `LLM_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4/` | LLM 平台 OpenAI 兼容端点（换平台改这里） |
+| `LLM_API_KEY` | — | 平台 API 密钥（缺失 fail-fast） |
 | `EMBEDDING_DIM` | 2048 | 向量维度（256–2048 可选） |
 | `EMBEDDING_MAX_BATCH` | 64 | embedding 单批最大条数（API 限制） |
 | `EMBEDDING_MAX_CONCURRENCY` | 8 | embedding 并发上限（账号限流） |
@@ -120,4 +122,4 @@ pytest --cov=agents_rag --cov-report=term-missing   # 覆盖率 ≥ 80%（实测
 
 - **已实现**：知识构建核心闭环（解析 / 分块 / 双索引 / 五态增量 / 轻量持久化 / CLI）
 - **本轮后置**：孤儿清理、崩溃恢复、全量校准、minerU / 独立 OCR 降级、多模态、Contextual Retrieval、HITL、ACL / 多租户、知识图谱
-- **后续阶段**：查询管线（检索 / RRF 融合 / 智谱 Rerank / GLM 生成 / 引用校验 / RAGAS）→ FastAPI → Streamlit
+- **后续阶段**：查询管线（检索 / RRF 融合 / Rerank / GLM 生成 / 引用校验 / RAGAS）→ FastAPI → Streamlit

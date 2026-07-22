@@ -6,7 +6,7 @@ import pytest
 from tenacity import stop_after_attempt, wait_fixed
 
 from agents_rag.indexing.cache import EmbeddingCache, cache_key
-from agents_rag.indexing.embedder import Embedder, ZhipuEmbedder, _NonRetryable
+from agents_rag.indexing.embedder import Embedder, OpenAIEmbedder, _NonRetryable
 
 
 class FakeEmbedder(Embedder):
@@ -71,7 +71,7 @@ def test_embed_cache_hit_skips_api(tmp_path):
     assert emb.calls == n  # 无新 API 调用
 
 
-# —— 6.4 zhipu 重试 ——
+# —— 6.4 embedder 重试 ——
 def _make_resp(input_texts, dim):
     class D:
         def __init__(self, emb):
@@ -85,9 +85,10 @@ def _make_resp(input_texts, dim):
     return r
 
 
-def test_zhipu_retries_on_rate_limit():
-    emb = ZhipuEmbedder(
+def test_embedder_retries_on_rate_limit():
+    emb = OpenAIEmbedder(
         api_key="fake",
+        base_url="http://fake/v1",
         dim=8,
         max_batch=64,
         retry_stop=stop_after_attempt(5),
@@ -107,9 +108,10 @@ def test_zhipu_retries_on_rate_limit():
     assert len(vecs[0]) == 8
 
 
-def test_zhipu_no_retry_on_auth_error():
-    emb = ZhipuEmbedder(
+def test_embedder_no_retry_on_auth_error():
+    emb = OpenAIEmbedder(
         api_key="fake",
+        base_url="http://fake/v1",
         dim=8,
         retry_stop=stop_after_attempt(5),
         retry_wait=wait_fixed(0),

@@ -6,7 +6,7 @@ from tenacity import stop_after_attempt, wait_fixed
 
 from agents_rag.indexing.vision_describer import (
     ImageDescriptionCache,
-    ZhipuVisionDescriber,
+    OpenAIVisionDescriber,
 )
 
 
@@ -34,7 +34,7 @@ def test_cache_versioned_by_model(tmp_path):
 def test_describe_cache_hit_skips_api(tmp_path):
     c = ImageDescriptionCache(tmp_path / "d.sqlite")
     c.put("hash1", "glm-4.5v", "缓存描述")
-    d = ZhipuVisionDescriber(api_key="fake", model="glm-4.5v")
+    d = OpenAIVisionDescriber(api_key="fake", base_url="http://fake/v1", model="glm-4.5v")
     called = {"n": 0}
 
     def fake(**kw):
@@ -50,7 +50,7 @@ def test_describe_cache_hit_skips_api(tmp_path):
 
 def test_describe_calls_api_and_caches(tmp_path):
     c = ImageDescriptionCache(tmp_path / "d.sqlite")
-    d = ZhipuVisionDescriber(api_key="fake", model="glm-4.5v")
+    d = OpenAIVisionDescriber(api_key="fake", base_url="http://fake/v1", model="glm-4.5v")
     d._client.chat.completions.create = lambda **kw: _fake_resp("API生成描述")  # type: ignore[attr-defined]
     desc = d.describe(b"img", content_hash="hash2", cache=c)
     assert desc == "API生成描述"
@@ -59,8 +59,8 @@ def test_describe_calls_api_and_caches(tmp_path):
 
 
 def test_describe_retries_on_rate_limit():
-    d = ZhipuVisionDescriber(
-        api_key="fake", model="glm-4.5v",
+    d = OpenAIVisionDescriber(
+        api_key="fake", base_url="http://fake/v1", model="glm-4.5v",
         retry_stop=stop_after_attempt(4), retry_wait=wait_fixed(0),
     )
     state = {"n": 0}
@@ -78,8 +78,8 @@ def test_describe_retries_on_rate_limit():
 
 
 def test_describe_failure_falls_back_to_caption():
-    d = ZhipuVisionDescriber(
-        api_key="fake", model="glm-4.5v",
+    d = OpenAIVisionDescriber(
+        api_key="fake", base_url="http://fake/v1", model="glm-4.5v",
         retry_stop=stop_after_attempt(2), retry_wait=wait_fixed(0),
     )
     d._client.chat.completions.create = lambda **kw: (_ for _ in ()).throw(RuntimeError("500"))  # type: ignore[attr-defined]

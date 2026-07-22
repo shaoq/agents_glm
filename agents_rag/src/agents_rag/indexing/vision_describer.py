@@ -1,4 +1,4 @@
-"""图片描述生成：智谱视觉模型（GLM-4.5V）+ 缓存 + 重试。笔记 §12.1.1 方案 A。
+"""图片描述生成：OpenAI 兼容视觉模型（默认智谱 GLM-4.5V）+ 缓存 + 重试。笔记 §12.1.1 方案 A。
 
 复用 embedder 的可/不可重试异常区分；描述缓存键 = ``content_hash + model``，
 图片与模型均不变时不调 API；失败时用 caption 兜底。
@@ -74,17 +74,18 @@ class ImageDescriptionCache:
         self._conn.commit()
 
 
-class ZhipuVisionDescriber:
+class OpenAIVisionDescriber:
     def __init__(
         self,
         api_key: str,
+        base_url: str,
         model: str = "glm-4.5v",
         retry_stop=None,
         retry_wait=None,
     ):
-        from zhipuai import ZhipuAI
+        from openai import OpenAI
 
-        self._client = ZhipuAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
         self._retry_stop = retry_stop or stop_after_attempt(4)
         self._retry_wait = retry_wait or wait_exponential(min=1, max=10)

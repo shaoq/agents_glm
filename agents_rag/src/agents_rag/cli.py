@@ -16,10 +16,10 @@ from agents_rag.ingestion.registry import DocumentRegistry
 from agents_rag.indexing.bm25_index import BM25Index
 from agents_rag.indexing.cache import EmbeddingCache
 from agents_rag.indexing.chroma_store import ChromaStore
-from agents_rag.indexing.embedder import ZhipuEmbedder
+from agents_rag.indexing.embedder import OpenAIEmbedder
 from agents_rag.indexing.image_store import ImageStore
 from agents_rag.indexing.parent_store import ParentStore
-from agents_rag.indexing.vision_describer import ImageDescriptionCache, ZhipuVisionDescriber
+from agents_rag.indexing.vision_describer import ImageDescriptionCache, OpenAIVisionDescriber
 from agents_rag.parsing.router import ParserRouter
 from agents_rag.pipeline.ingest import IngestPipeline, IngestReport
 
@@ -59,8 +59,9 @@ def ingest(
                 chunk_size=settings.chunk_size,
                 overlap=settings.chunk_overlap,
             ),
-            embedder=ZhipuEmbedder(
+            embedder=OpenAIEmbedder(
                 api_key=api_key,
+                base_url=settings.llm_base_url,
                 model=settings.embedding_model,
                 dim=settings.embedding_dim,
                 max_batch=settings.embedding_max_batch,
@@ -71,7 +72,11 @@ def ingest(
             bm25=bm25,
             parent_store=ParentStore(settings.parents_dir),
             image_store=image_store,
-            vision_describer=ZhipuVisionDescriber(api_key=api_key, model=settings.vision_model),
+            vision_describer=OpenAIVisionDescriber(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.vision_model,
+            ),
             description_cache=desc_cache,
         )
         report = pipe.run(directory)

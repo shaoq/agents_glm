@@ -8,6 +8,12 @@
   - 仅当用户**明确**要求推送时才执行 `git push`。
   - 原因：本仓库以本地开发为主，无需远端协作 / review，避免远端分支堆积。
 
+## 配置（.env）
+
+- **`.env` 必须与 `.env.example` 配置项完全对齐**：即使某项在代码（`config.py` 的 `Settings`）或 `.env.example` 里有默认值，也要在 `.env` 中显式列出——让 `.env` 自包含、可直接编辑，运维 / 切换平台时无需回看 example 或代码默认值。
+- 新增 / 修改配置项时，同步更新 `agents_rag/.env` 与 `agents_rag/.env.example` 两处，保持键集合一致。
+- 校验：`diff <(grep -oE '^[A-Z_]+' agents_rag/.env | sort) <(grep -oE '^[A-Z_]+' agents_rag/.env.example | sort)`（无输出即一致）。
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

@@ -21,8 +21,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # 智谱 API
-    zhipuai_api_key: str = ""
+    # LLM 平台（OpenAI 兼容端点）：当前指向智谱 BigModel
+    llm_api_key: str = ""
+    llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
 
     # Embedding
     embedding_model: str = "embedding-3"
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     embedding_max_batch: int = 64
     embedding_max_concurrency: int = 8
 
-    # 视觉（图片描述生成，智谱 GLM-V 系列）
+    # 视觉（图片描述生成，OpenAI 兼容视觉模型，默认智谱 glm-4.5v）
     vision_model: str = "glm-4.5v"
 
     # 分块
@@ -73,11 +74,11 @@ class Settings(BaseSettings):
 
     def require_api_key(self) -> str:
         """需要密钥的组件调用；缺失 fail-fast。"""
-        if not self.zhipuai_api_key:
+        if not self.llm_api_key:
             raise RuntimeError(
-                "ZHIPUAI_API_KEY 未配置：请在项目根的 .env 或环境变量中设置。"
+                "LLM_API_KEY 未配置：请在项目根的 .env 或环境变量中设置。"
             )
-        return self.zhipuai_api_key
+        return self.llm_api_key
 
     def ensure_storage_dirs(self) -> None:
         """创建存储相关目录（幂等）。"""

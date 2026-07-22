@@ -29,7 +29,7 @@ from agents_rag.indexing.embedder import Embedder
 from agents_rag.indexing.image_store import ImageStore, detect_format, image_content_hash
 from agents_rag.indexing.parent_store import ParentStore
 from agents_rag.indexing.vectorstore import VectorStore
-from agents_rag.indexing.vision_describer import ImageDescriptionCache, ZhipuVisionDescriber
+from agents_rag.indexing.vision_describer import ImageDescriptionCache, OpenAIVisionDescriber
 from agents_rag.models import (
     Action,
     ActionKind,
@@ -66,7 +66,7 @@ class IngestPipeline:
         bm25: BM25Index,
         parent_store: ParentStore,
         image_store: ImageStore | None = None,
-        vision_describer: ZhipuVisionDescriber | None = None,
+        vision_describer: OpenAIVisionDescriber | None = None,
         description_cache: ImageDescriptionCache | None = None,
         namespace: str = "local",
     ):

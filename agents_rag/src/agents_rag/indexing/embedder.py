@@ -1,4 +1,4 @@
-"""智谱 embedding-3 向量化：批量 + 并发限流 + tenacity 重试 + 缓存。
+"""向量化（OpenAI 兼容 embedding）：批量 + 并发限流 + tenacity 重试 + 缓存。
 
 笔记 §6.4（批处理 / 并发 / 重试）/ §6.5（缓存）/ §6.13（缓存键版本化）。
 
@@ -88,12 +88,13 @@ class Embedder(ABC):
         return results  # type: ignore[return-value]
 
 
-class ZhipuEmbedder(Embedder):
-    """智谱 embedding-3 实现。"""
+class OpenAIEmbedder(Embedder):
+    """OpenAI 兼容 embedding 实现（默认智谱 embedding-3）。"""
 
     def __init__(
         self,
         api_key: str,
+        base_url: str,
         model: str = "embedding-3",
         dim: int = 2048,
         max_batch: int = 64,
@@ -101,9 +102,9 @@ class ZhipuEmbedder(Embedder):
         retry_stop=None,
         retry_wait=None,
     ):
-        from zhipuai import ZhipuAI
+        from openai import OpenAI
 
-        self._client = ZhipuAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
         self._dim = dim
         self.max_batch = max_batch
