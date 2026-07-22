@@ -1,13 +1,3 @@
-# 项目工作规则
-
-## Git
-
-- **分支不推送远端**：开发 / feature 分支仅在本地累积提交，**默认不** `git push`。
-  - 收到 "commit" 指令时只在本地完成提交，不推送远端。
-  - `main` 等共享主干分支不在此列。
-  - 仅当用户**明确**要求推送时才执行 `git push`。
-  - 原因：本仓库以本地开发为主，无需远端协作 / review，避免远端分支堆积。
-
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
