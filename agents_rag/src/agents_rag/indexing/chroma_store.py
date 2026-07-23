@@ -40,5 +40,29 @@ class ChromaStore(VectorStore):
         dists = res.get("distances", [[]])[0]
         return list(zip(ids, dists))
 
+    def query_detailed(
+        self, vector: list[float], k: int = 10, where: dict | None = None
+    ) -> list[dict]:
+        """查询返回完整信息（id/distance/document/metadata），供查询侧使用。"""
+        res = self._col.query(query_embeddings=[vector], n_results=k, where=where)
+        ids = res.get("ids", [[]])[0]
+        dists = res.get("distances", [[]])[0]
+        docs = res.get("documents", [[]])[0]
+        metas = res.get("metadatas", [[]])[0]
+        return [
+            {"id": i, "distance": d, "document": doc, "metadata": meta}
+            for i, d, doc, meta in zip(ids, dists, docs, metas)
+        ]
+
+    def get_by_ids(self, ids: list[str]) -> list[dict]:
+        """按 chunk_id 批量取 document + metadata（BM25 召回后补取用）。"""
+        if not ids:
+            return []
+        res = self._col.get(ids=ids)
+        return [
+            {"id": i, "document": d, "metadata": m}
+            for i, d, m in zip(res.get("ids", []), res.get("documents", []), res.get("metadatas", []))
+        ]
+
     def count(self) -> int:
         return self._col.count()
