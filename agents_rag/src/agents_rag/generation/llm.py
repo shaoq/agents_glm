@@ -27,7 +27,7 @@ class Generator(ABC):
         raise NotImplementedError
 
 
-class GLMGenerator(Generator):
+class OpenAIGenerator(Generator):
     def __init__(
         self,
         api_key: str,

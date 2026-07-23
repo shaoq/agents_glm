@@ -28,7 +28,7 @@ from agents_rag.retrieval.vector import VectorRetriever
 from agents_rag.retrieval.bm25 import BM25Retriever
 from agents_rag.retrieval.reranker import ZhipuReranker
 from agents_rag.generation.context_builder import ContextBuilder
-from agents_rag.generation.llm import GLMGenerator
+from agents_rag.generation.llm import OpenAIGenerator
 from agents_rag.citation.checker import CitationChecker
 from agents_rag.models import Answer
 
@@ -140,7 +140,7 @@ def ask(
                 parent_store=ParentStore(settings.parents_dir),
                 max_tokens=settings.llm_max_context_tokens,
             ),
-            generator=GLMGenerator(
+            generator=OpenAIGenerator(
                 api_key=api_key,
                 base_url=settings.llm_base_url,
                 model=settings.llm_model,
