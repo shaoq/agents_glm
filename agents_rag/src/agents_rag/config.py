@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     contextualization_max_tokens: int = 150
     contextualization_max_concurrency: int = 8
 
+    # Faithfulness 二次校验（LLM judge，默认关）
+    faithfulness_enabled: bool = False
+    faithfulness_model: str = "GLM-4.7-Flash"
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64

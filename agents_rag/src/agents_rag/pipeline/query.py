@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from agents_rag.citation.checker import CitationChecker
+from agents_rag.citation.faithfulness import FaithfulnessChecker
 from agents_rag.generation.context_builder import ContextBuilder
 from agents_rag.generation.llm import Generator
 from agents_rag.models import Answer, AnswerStatus
@@ -27,6 +28,7 @@ class QueryPipeline:
         context_builder: ContextBuilder,
         generator: Generator,
         citation_checker: CitationChecker,
+        faithfulness_checker: FaithfulnessChecker | None = None,
         vector_top_k: int = 20,
         bm25_top_k: int = 20,
         rerank_top_n: int = 6,
@@ -36,6 +38,7 @@ class QueryPipeline:
         self._context_builder = context_builder
         self._generator = generator
         self._citation_checker = citation_checker
+        self._faithfulness_checker = faithfulness_checker
         self._vector_top_k = vector_top_k
         self._bm25_top_k = bm25_top_k
         self._rerank_top_n = rerank_top_n
@@ -75,4 +78,11 @@ class QueryPipeline:
         answer_text = self._generator.generate(query, context_str)
 
         # ⑧ 引用校验
-        return self._citation_checker.check(answer_text, id_map)
+        answer = self._citation_checker.check(answer_text, id_map)
+
+        # ⑨ Faithfulness 二次校验（可选，只打分不拦截）
+        if self._faithfulness_checker is not None:
+            score = self._faithfulness_checker.check(answer.text, context_str)
+            answer = answer.model_copy(update={"faithfulness_score": score})
+
+        return answer

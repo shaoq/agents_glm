@@ -307,3 +307,4 @@ class Answer(BaseModel):
     used_context_ids: tuple[str, ...] = ()
     status: AnswerStatus = AnswerStatus.ANSWERED
     message: str = ""
+    faithfulness_score: float | None = None  # faithfulness 校验分数（None=未校验/失败）

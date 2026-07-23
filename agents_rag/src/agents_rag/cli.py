@@ -31,6 +31,7 @@ from agents_rag.retrieval.reranker import ZhipuReranker
 from agents_rag.generation.context_builder import ContextBuilder
 from agents_rag.generation.llm import OpenAIGenerator
 from agents_rag.citation.checker import CitationChecker
+from agents_rag.citation.faithfulness import FaithfulnessChecker
 from agents_rag.models import Answer
 
 app = typer.Typer(help="agents_rag 知识构建（索引管线）CLI")
@@ -140,6 +141,15 @@ def ask(
             dim=settings.embedding_dim,
         )
         store = ChromaStore(settings.chroma_dir)
+        faithfulness_checker = (
+            FaithfulnessChecker(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.faithfulness_model,
+            )
+            if settings.faithfulness_enabled
+            else None
+        )
         pipe = QueryPipeline(
             hybrid_retriever=HybridRetriever(
                 VectorRetriever(embedder, store),
@@ -160,6 +170,7 @@ def ask(
                 model=settings.llm_model,
             ),
             citation_checker=CitationChecker(),
+            faithfulness_checker=faithfulness_checker,
             vector_top_k=settings.vector_top_k,
             bm25_top_k=settings.bm25_top_k,
             rerank_top_n=settings.rerank_top_n,
@@ -174,6 +185,8 @@ def _print_answer(answer: Answer) -> None:
         console.print(f"[yellow]未找到[/] · {answer.message}")
         return
     console.print(f"[bold green]回答[/]\n{answer.text}\n")
+    if answer.faithfulness_score is not None:
+        console.print(f"[dim]faithfulness: {answer.faithfulness_score:.2f}[/]")
     if answer.citations:
         console.print("[bold]引用来源[/]")
         for i, c in enumerate(answer.citations, 1):
