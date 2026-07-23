@@ -14,10 +14,17 @@
 - 新增 / 修改配置项时，同步更新 `agents_rag/.env` 与 `agents_rag/.env.example` 两处，保持键集合一致。
 - 校验：`diff <(grep -oE '^[A-Z_]+' agents_rag/.env | sort) <(grep -oE '^[A-Z_]+' agents_rag/.env.example | sort)`（无输出即一致）。
 
+## 工作流（OpenSpec 优先）
+
+- **探索 / 分析类请求 → 启动 OpenSpec explore**：当用户输入「explore」「分析」「探讨」「梳理」「研究」等探索 / 需求分析类关键词时，**启动 OpenSpec 的 explore skill**（`openspec-explore` / `opsx:explore`）进行分析，**不要**进入 Claude Code 自带的 plan mode。
+- **后续统一走 OpenSpec 工作流**：explore → propose（`openspec-propose` / `opsx:propose`）→ apply（`openspec-apply-change` / `opsx:apply`）。规划与实施都用 OpenSpec，不用 plan mode。
+- **例外**：纯粹的 bug 调试走 `systematic-debugging`、代码理解走 GitNexus，不强制走 OpenSpec——本规则针对「需求探索 / 方案规划」类任务。
+- 原因：本项目以 OpenSpec 做 spec-driven 管理（`openspec/` 已建 specs / changes），工作流需与之对齐。
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **agents_glm** (1980 symbols, 3164 relationships, 39 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **agents_glm** (2074 symbols, 3325 relationships, 42 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
