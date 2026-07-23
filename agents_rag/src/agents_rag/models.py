@@ -254,3 +254,50 @@ class ImageRecord(BaseModel):
     format: str = "png"  # 图片格式（mime: image/{format}）
     content_hash: str
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+# —— 查询侧数据结构 ——
+class RetrievalResult(BaseModel):
+    """检索结果（向量/BM25/RRF融合/Rerank 后的统一表示）。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    chunk_id: str
+    text: str
+    score: float
+    retriever: str  # vector | bm25 | fused | reranked
+    doc_id: str
+    parent_id: str
+    page: int | None = None
+    heading: str | None = None
+    section_path: str = ""
+    source_name: str = ""
+    image_ref: str | None = None
+
+
+class Citation(BaseModel):
+    """引用来源（溯源展示用）。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    doc_id: str
+    source_name: str
+    page: int | None = None
+    snippet: str = ""
+
+
+class AnswerStatus(str, Enum):
+    ANSWERED = "answered"
+    NO_RESULT = "no_result"
+
+
+class Answer(BaseModel):
+    """查询回答（生成 + 引用校验后的最终产物）。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    citations: tuple[Citation, ...] = ()
+    used_context_ids: tuple[str, ...] = ()
+    status: AnswerStatus = AnswerStatus.ANSWERED
+    message: str = ""

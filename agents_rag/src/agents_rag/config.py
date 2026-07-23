@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # 视觉（图片描述生成，OpenAI 兼容视觉模型，默认智谱 glm-4.5v）
     vision_model: str = "glm-4.5v"
 
+    # 查询管线
+    llm_model: str = "glm-4.5"
+    rerank_model: str = "rerank-2"
+    vector_top_k: int = 20
+    bm25_top_k: int = 20
+    rerank_top_n: int = 6
+    llm_max_context_tokens: int = 6000
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64

@@ -22,6 +22,15 @@ from agents_rag.indexing.parent_store import ParentStore
 from agents_rag.indexing.vision_describer import ImageDescriptionCache, OpenAIVisionDescriber
 from agents_rag.parsing.router import ParserRouter
 from agents_rag.pipeline.ingest import IngestPipeline, IngestReport
+from agents_rag.pipeline.query import QueryPipeline
+from agents_rag.retrieval.hybrid import HybridRetriever
+from agents_rag.retrieval.vector import VectorRetriever
+from agents_rag.retrieval.bm25 import BM25Retriever
+from agents_rag.retrieval.reranker import ZhipuReranker
+from agents_rag.generation.context_builder import ContextBuilder
+from agents_rag.generation.llm import GLMGenerator
+from agents_rag.citation.checker import CitationChecker
+from agents_rag.models import Answer
 
 app = typer.Typer(help="agents_rag 知识构建（索引管线）CLI")
 console = Console()
@@ -95,6 +104,68 @@ def _print_report(report: IngestReport) -> None:
     console.print(table)
     for doc_id, err in report.failed:
         console.print(f"  [red]{doc_id}[/]: {err}")
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="提问内容"),
+) -> None:
+    """基于已建索引回答问题（带引用来源）。"""
+    settings.ensure_storage_dirs()
+    api_key = settings.require_api_key()
+
+    bm25 = BM25Index.load(settings.bm25_path) if settings.bm25_path.exists() else BM25Index()
+    with (
+        DocumentRegistry(settings.registry_path),
+        EmbeddingCache(settings.embedding_cache_path) as cache,
+    ):
+        embedder = OpenAIEmbedder(
+            api_key=api_key,
+            base_url=settings.llm_base_url,
+            model=settings.embedding_model,
+            dim=settings.embedding_dim,
+        )
+        store = ChromaStore(settings.chroma_dir)
+        pipe = QueryPipeline(
+            hybrid_retriever=HybridRetriever(
+                VectorRetriever(embedder, store),
+                BM25Retriever(bm25, store),
+            ),
+            reranker=ZhipuReranker(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.rerank_model,
+            ),
+            context_builder=ContextBuilder(
+                parent_store=ParentStore(settings.parents_dir),
+                max_tokens=settings.llm_max_context_tokens,
+            ),
+            generator=GLMGenerator(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.llm_model,
+            ),
+            citation_checker=CitationChecker(),
+            vector_top_k=settings.vector_top_k,
+            bm25_top_k=settings.bm25_top_k,
+            rerank_top_n=settings.rerank_top_n,
+        )
+        answer = pipe.ask(question)
+
+    _print_answer(answer)
+
+
+def _print_answer(answer: Answer) -> None:
+    if answer.status.value == "no_result":
+        console.print(f"[yellow]未找到[/] · {answer.message}")
+        return
+    console.print(f"[bold green]回答[/]\n{answer.text}\n")
+    if answer.citations:
+        console.print("[bold]引用来源[/]")
+        for i, c in enumerate(answer.citations, 1):
+            page_str = f"第{c.page}页" if c.page else "页码未知"
+            console.print(f"  [{i}] {c.source_name} · {page_str}")
+            console.print(f"      {c.snippet}")
 
 
 if __name__ == "__main__":

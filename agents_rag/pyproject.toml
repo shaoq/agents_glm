@@ -28,6 +28,7 @@ dependencies = [
     "rich>=13",
     "tenacity>=8",
     "sniffio>=1.3",  # openai/httpx 传递依赖，显式声明避免缺失
+    "tiktoken>=0.7",  # ContextBuilder token 预算（+15% buffer 补偿 GLM tokenizer 偏差）
 ]
 
 [project.optional-dependencies]
