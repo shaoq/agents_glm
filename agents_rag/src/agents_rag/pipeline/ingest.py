@@ -214,7 +214,9 @@ class IngestPipeline:
         new_children = []
         for c in children:
             heading = f" · 标题：{c.heading}" if c.heading else ""
-            doc_context = f"文档：《{doc_title}》· 章节：{c.section_path}{heading}"
+            section_summary = self._find_section_summary(document.sections, c.section_path)
+            summary_str = f" · 章节内容：{section_summary}" if section_summary else ""
+            doc_context = f"文档：《{doc_title}》· 章节：{c.section_path}{heading}{summary_str}"
             ctx = self.contextualizer.contextualize(
                 c.text,
                 doc_context,
@@ -223,6 +225,18 @@ class IngestPipeline:
             )
             new_children.append(c.model_copy(update={"context": ctx}))
         return new_children
+
+    def _find_section_summary(self, sections, section_path: str, max_chars: int = 300) -> str:
+        """递归搜索 section 树，按 section_path 匹配 heading，取 block 文本摘要。"""
+        for sec in sections:
+            if sec.heading and sec.heading in section_path:
+                text = " ".join(b.text for b in sec.blocks if b.text)
+                if text:
+                    return text[:max_chars] + "..." if len(text) > max_chars else text
+            result = self._find_section_summary(sec.children, section_path, max_chars)
+            if result:
+                return result
+        return ""
 
     def _delete_chunks(self, doc_id: str) -> None:
         self.vector_store.delete_by_doc(doc_id)
