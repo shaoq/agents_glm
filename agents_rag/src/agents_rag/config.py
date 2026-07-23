@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # Contextual Retrieval（chunk 上下文前缀，便宜 LLM 生成）
     contextualization_enabled: bool = False
-    contextualization_model: str = "glm-4-flash"
+    contextualization_model: str = "GLM-4.7-Flash"
     contextualization_max_tokens: int = 150
     contextualization_max_concurrency: int = 8
 
