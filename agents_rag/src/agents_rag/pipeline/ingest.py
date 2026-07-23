@@ -29,6 +29,7 @@ from agents_rag.indexing.embedder import Embedder
 from agents_rag.indexing.image_store import ImageStore, detect_format, image_content_hash
 from agents_rag.indexing.parent_store import ParentStore
 from agents_rag.indexing.vectorstore import VectorStore
+from agents_rag.indexing.contextualizer import ContextCache, OpenAIContextualizer
 from agents_rag.indexing.vision_describer import ImageDescriptionCache, OpenAIVisionDescriber
 from agents_rag.models import (
     Action,
@@ -68,6 +69,8 @@ class IngestPipeline:
         image_store: ImageStore | None = None,
         vision_describer: OpenAIVisionDescriber | None = None,
         description_cache: ImageDescriptionCache | None = None,
+        contextualizer: OpenAIContextualizer | None = None,
+        context_cache: ContextCache | None = None,
         namespace: str = "local",
     ):
         self.registry = registry
@@ -82,6 +85,8 @@ class IngestPipeline:
         self.image_store = image_store
         self.vision_describer = vision_describer
         self.description_cache = description_cache
+        self.contextualizer = contextualizer
+        self.context_cache = context_cache
         self.namespace = namespace
 
     def run(self, directory: str | Path) -> IngestReport:
@@ -122,8 +127,12 @@ class IngestPipeline:
         parents, children = self.chunker.chunk(document)
         version = (action.old_record.version + 1) if action.old_record else 1
 
+        # CR 阶段（分块后、embed 前）：为每个 chunk 生成客观定位前缀
+        if self.contextualizer is not None:
+            children = self._contextualize_children(children, document)
+
         if children:
-            vectors = self.embedder.embed([c.text for c in children], cache=self.cache)
+            vectors = self.embedder.embed([c.indexed_text for c in children], cache=self.cache)
             self.vector_store.upsert(children, vectors)
             self.bm25.upsert(children)
             self.parent_store.put_many(parents)
@@ -196,6 +205,23 @@ class IngestPipeline:
         rec = self.registry.get(action.doc_id)
         if rec is not None:
             self.registry.upsert(rec.model_copy(update={"source_path": action.source_path}))
+
+    def _contextualize_children(self, children: list, document) -> list:
+        """CR 阶段：为每个 child chunk 生成 context 前缀（客观定位）。"""
+        from agents_rag.ingestion.fingerprint import text_fingerprint
+
+        new_children = []
+        for c in children:
+            sec = f" · 章节：{c.section_path}" if c.section_path else ""
+            doc_context = f"文档：{document.source}{sec}"
+            ctx = self.contextualizer.contextualize(
+                c.text,
+                doc_context,
+                text_hash=text_fingerprint(c.text),
+                cache=self.context_cache,
+            )
+            new_children.append(c.model_copy(update={"context": ctx}))
+        return new_children
 
     def _delete_chunks(self, doc_id: str) -> None:
         self.vector_store.delete_by_doc(doc_id)

@@ -133,6 +133,12 @@ class ChildChunk(BaseModel):
     version: int = 1
     status: ChunkStatus = ChunkStatus.ACTIVE
     image_ref: str | None = None  # type=image 时关联原图（chunk 级，供查询侧回传）
+    context: str = ""  # Contextual Retrieval 客观定位前缀（空则未启用/兜底）
+
+    @property
+    def indexed_text(self) -> str:
+        """embedding / BM25 的索引文本 = context + chunk（CR 核心）。"""
+        return f"{self.context}\n\n{self.text}" if self.context else self.text
 
     def metadata_dict(self) -> dict[str, Any]:
         """供向量库 metadata 存储（Chroma metadata 值须为基础类型）。"""

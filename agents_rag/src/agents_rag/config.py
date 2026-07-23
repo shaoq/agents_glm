@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     rerank_top_n: int = 6
     llm_max_context_tokens: int = 6000
 
+    # Contextual Retrieval（chunk 上下文前缀，便宜 LLM 生成）
+    contextualization_enabled: bool = False
+    contextualization_model: str = "glm-4-flash"
+    contextualization_max_tokens: int = 150
+    contextualization_max_concurrency: int = 8
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64
@@ -71,6 +77,10 @@ class Settings(BaseSettings):
     @property
     def embedding_cache_path(self) -> Path:
         return self.storage_dir / "embedding_cache.sqlite"
+
+    @property
+    def context_cache_path(self) -> Path:
+        return self.storage_dir / "context_cache.sqlite"
 
     @property
     def registry_path(self) -> Path:

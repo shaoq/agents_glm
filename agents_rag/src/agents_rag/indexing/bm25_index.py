@@ -34,7 +34,7 @@ class BM25Index:
 
     def upsert(self, chunks: list[ChildChunk]) -> None:
         for c in chunks:
-            self._docs[c.id] = tokenize(c.text)
+            self._docs[c.id] = tokenize(c.indexed_text)
         self._dirty = True
 
     def remove_by_ids(self, ids: list[str]) -> None:

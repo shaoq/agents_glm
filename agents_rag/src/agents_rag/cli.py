@@ -16,6 +16,7 @@ from agents_rag.ingestion.registry import DocumentRegistry
 from agents_rag.indexing.bm25_index import BM25Index
 from agents_rag.indexing.cache import EmbeddingCache
 from agents_rag.indexing.chroma_store import ChromaStore
+from agents_rag.indexing.contextualizer import ContextCache, OpenAIContextualizer
 from agents_rag.indexing.embedder import OpenAIEmbedder
 from agents_rag.indexing.image_store import ImageStore
 from agents_rag.indexing.parent_store import ParentStore
@@ -58,7 +59,18 @@ def ingest(
         EmbeddingCache(settings.embedding_cache_path) as cache,
         ImageStore(settings.images_dir) as image_store,
         ImageDescriptionCache(settings.storage_dir / "image_descriptions.sqlite") as desc_cache,
+        ContextCache(settings.context_cache_path) as ctx_cache,
     ):
+        contextualizer = (
+            OpenAIContextualizer(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.contextualization_model,
+                max_tokens=settings.contextualization_max_tokens,
+            )
+            if settings.contextualization_enabled
+            else None
+        )
         pipe = IngestPipeline(
             registry=registry,
             router=ParserRouter.with_defaults(enable_pdf=not no_pdf),
@@ -87,6 +99,8 @@ def ingest(
                 model=settings.vision_model,
             ),
             description_cache=desc_cache,
+            contextualizer=contextualizer,
+            context_cache=ctx_cache if contextualizer else None,
         )
         report = pipe.run(directory)
         bm25.save(bm25_path)
