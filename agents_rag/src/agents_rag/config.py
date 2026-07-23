@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     vision_model: str = "glm-4.5v"
 
     # 查询管线
-    llm_model: str = "glm-4.5"
+    llm_model: str = "glm-5.2"
     rerank_model: str = "rerank-2"
     vector_top_k: int = 20
     bm25_top_k: int = 20
