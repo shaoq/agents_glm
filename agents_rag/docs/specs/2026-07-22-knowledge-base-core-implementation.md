@@ -28,10 +28,10 @@
 | 环节 | 本轮实现 | 笔记依据 |
 |------|---------|---------|
 | 采集 / 注册表 | 内容指纹（SHA-256 流式 + `(size, mtime)` 预筛）+ 文档注册表（sqlite，真相源）+ 五态 diff + 两阶段执行 + 先建新后删旧 + `status` 标记中间态 | §2 |
-| 解析 | `ParserRouter` 降级链 + **docling 主力（PDF）** + Office / HTML / Markdown + 统一 `Document(sections→blocks)` 模型 + 解析质量评估 | §3 |
+| 解析 | `ParserRouter` **诊断式降级** + **docling 主力（PDF）** + Office / HTML / Markdown + 统一 `Document(sections→blocks)` 模型 + 解析质量评估（`poor_reason`） | §3 |
 | 清洗 | 轻量归一化（空白 / 全半角 / 去页眉页脚），按 `doc_type` 配置，**不动结构、保留 page/heading** | §4 |
 | 分块 | 结构感知分块（尊重 block 边界，表格 / 代码豁免）+ **父子分块**（父块 = section 存 KV，子块建向量 + BM25 索引） | §5 |
-| 向量化 | 智谱 **embedding-3**（批量 ≤64 + 并发限流 + tenacity 重试）+ **embedding 缓存**（sqlite，键 = `hash(text)+model+dim` 版本化） | §6.4 / 6.5 / 6.13 |
+| 向量化 | **embedding-3**（默认智谱，走 OpenAI 兼容协议；批量 ≤64 + 并发限流 + tenacity 重试）+ **embedding 缓存**（sqlite，键 = `hash(text)+model+dim` 版本化） | §6.4 / 6.5 / 6.13 |
 | 索引 | Chroma（HNSW，`PersistentClient` 落盘，`VectorStore` 抽象）+ BM25（jieba + rank_bm25，pickle 落盘）+ 父块 KV，`chunk_id` 对齐 | §6.6 / 6.7 |
 | 元数据 | chunk metadata schema（doc_id / source / page / heading / section_path / parent_id / version / status / block_type / char_span） | §7 |
 | 持久化 | **轻量层本轮做**：Chroma path + embedding 缓存 sqlite + 文档注册表 sqlite + BM25 / 父块 pickle 落盘 | §8 |
@@ -92,8 +92,8 @@ agents_rag/
     │   ├── office_parser.py           # docx / xlsx / pptx
     │   ├── html_parser.py             # trafilatura + bs4
     │   ├── markdown_parser.py
-    │   ├── router.py                  # ParserRouter 降级链
-    │   └── quality.py                 # QualityReport + is_poor
+    │   ├── router.py                  # ParserRouter 诊断式降级（poor_reason 选兜底）
+    │   └── quality.py                 # QualityReport + poor_reason
     ├── cleaning/
     │   ├── __init__.py
     │   └── normalizer.py              # 按 doc_type 清洗
@@ -104,7 +104,7 @@ agents_rag/
     │   └── parent_child.py            # 父子分块
     ├── indexing/
     │   ├── __init__.py
-    │   ├── embedder.py                # Embedder ABC + ZhipuEmbedder
+    │   ├── embedder.py                # Embedder ABC + OpenAIEmbedder
     │   ├── cache.py                   # EmbeddingCache（sqlite，版本化键）
     │   ├── vectorstore.py             # VectorStore ABC
     │   ├── chroma_store.py            # ChromaStore（PersistentClient）
@@ -206,10 +206,10 @@ class Action:
 | 接口 | 方法 | 本轮实现 | 笔记依据 |
 |------|------|---------|---------|
 | `Parser` | `parse(path) -> Document` | Docling / Office / HTML / Markdown | §3 |
-| `ParserRouter` | `parse(path) -> Document \| None` | 按扩展名路由 + 质量评估降级，全失败跳过+日志 | §3.6 / 3.9 |
+| `ParserRouter` | `parse(path) -> Document \| None` | 按扩展名路由 + 诊断式降级（`poor_reason` 选兜底，只降一级），兜底仍 poor/无兜底则跳过+日志 | §3.6 / 3.9 |
 | `Normalizer` | `normalize(doc) -> Document` | 按 doc_type 轻量归一化 | §4 |
 | `Chunker` | `chunk(doc) -> (list[ParentChunk], list[ChildChunk])` | 结构感知 + 父子 | §5.4 / 5.14 |
-| `Embedder` | `embed(texts) -> list[Vec]` | ZhipuEmbedder（批量 + 并发 + 重试 + 缓存） | §6.4 |
+| `Embedder` | `embed(texts) -> list[Vec]` | OpenAIEmbedder（批量 + 并发 + 重试 + 缓存） | §6.4 |
 | `EmbeddingCache` | `get/put(key)` | sqlite，key = `hash(text)+model+dim` | §6.5 / 6.13 |
 | `VectorStore` | `upsert / delete_by_doc / query` | ChromaStore（PersistentClient） | §6.8 |
 | `BM25Index` | `index / query / save / load` | jieba + rank_bm25，pickle | §6.6 / 6.7 |
@@ -252,10 +252,10 @@ scan(data/raw/)                         # Collector：流式 hash + (size,mtime)
 1. **项目骨架**：`pyproject.toml`（PEP 621 + 入口脚本）+ `src` 布局 + `.env.example` + `config.py` + 装核心依赖到 conda `agents_glm`。
 2. **`models.py`**：§3 全部数据结构（pydantic frozen）。
 3. **`ingestion/`**：`fingerprint.py`（流式 hash + 预筛）→ `registry.py`（DocumentRegistry sqlite）→ `collector.py`（扫描 + 五态 diff）→ `actions.py`。
-4. **`parsing/`**：`base.py` → `markdown_parser.py` / `html_parser.py` / `office_parser.py` → `docling_parser.py` → `quality.py` → `router.py`（降级链）。
+4. **`parsing/`**：`base.py` → `markdown_parser.py` / `html_parser.py` / `office_parser.py` → `docling_parser.py` → `quality.py` → `router.py`（诊断式降级）。
 5. **`cleaning/normalizer.py`**：按 doc_type 归一化。
 6. **`chunking/`**：`base.py` → `structural.py` → `parent_child.py`（父块 = section，`parent_max_size` 由 token 预算反推，笔记 §5.15）。
-7. **`indexing/embedder.py` + `cache.py`**：ZhipuEmbedder（批量 64 + 并发限流 + tenacity）+ EmbeddingCache（版本化键）。
+7. **`indexing/embedder.py` + `cache.py`**：OpenAIEmbedder（批量 64 + 并发限流 + tenacity）+ EmbeddingCache（版本化键）。
 8. **`indexing/`**：`vectorstore.py`(ABC) → `chroma_store.py`(PersistentClient) → `bm25_index.py`(jieba+rank_bm25+pickle) → `parent_store.py`(KV)。
 9. **`pipeline/ingest.py`**：IngestPipeline 编排（§5）。
 10. **`cli.py`**：`agents-rag ingest <dir>` 子命令。
@@ -267,7 +267,8 @@ scan(data/raw/)                         # Collector：流式 hash + (size,mtime)
 
 ```dotenv
 # .env.example（真实 .env 不入库）
-ZHIPUAI_API_KEY=
+LLM_API_KEY=
+LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
 EMBEDDING_MODEL=embedding-3
 EMBEDDING_DIM=2048
 EMBEDDING_MAX_BATCH=64
@@ -279,7 +280,7 @@ DATA_DIR=./data
 STORAGE_DIR=./storage
 ```
 
-- 启动校验 `ZHIPUAI_API_KEY`，缺失 fail-fast（spec §11）。
+- 启动校验 `LLM_API_KEY`，缺失 fail-fast（spec §11）。
 - 查询侧参数（`VECTOR_TOP_K` / `BM25_TOP_K` / `RERANK_TOP_N` / `LLM_*`）本轮不实现，不放。
 
 ---
@@ -291,7 +292,7 @@ STORAGE_DIR=./storage
 name = "agents-rag"
 requires-python = ">=3.12"
 dependencies = [
-    "zhipuai",
+    "openai",
     "chromadb",
     "rank-bm25",
     "jieba",
@@ -310,7 +311,7 @@ dev = ["pytest", "pytest-asyncio", "ruff"]
 agents-rag = "agents_rag.cli:app"
 ```
 
-> 本轮**不装**：`mineru`、`rapidocr-onnxruntime`（docling 内置 OCR 选项可按需启用，独立降级链后置）、`ragas`/`datasets`（查询侧评估）、`fastapi`/`streamlit`（后续阶段）。装到 conda `agents_glm`。docling 会触发模型下载，首跑较慢。
+> 本轮**不装**：`mineru`（重依赖，诊断式降级中 `layout` 兜底按需启用，未装则 layout poor 跳过）、`ragas`/`datasets`（查询侧评估）、`fastapi`/`streamlit`（后续阶段）。已装：`PyMuPDF`（`OCRParser` 渲染 PDF 页面，扫描件 `scan` 兜底）。装到 conda `agents_glm`。docling 会触发模型下载，首跑较慢。
 
 ---
 
@@ -335,7 +336,7 @@ agents-rag = "agents_rag.cli:app"
 ## 10. 后置清单（本轮明确不做）
 
 - 孤儿清理（异常中断残留的兜底扫描，与五态 delete 动作不同）、superseded 旧 chunk 的延迟批量物理删除、崩溃恢复（WAL / 重放 / checkpoint）、定期全量校准（§1 持久化重型层）。
-- minerU、独立 RapidOCR 降级链、多模态描述、Contextual Retrieval。
+- 多模态描述、Contextual Retrieval。
 - 解析置信度 + HITL、ACL / 多租户、知识图谱、层级索引、蓝绿迁移。
 - **查询管线全部**（检索 / 重排 / 生成 / 引用 / RAGAS）。
 
