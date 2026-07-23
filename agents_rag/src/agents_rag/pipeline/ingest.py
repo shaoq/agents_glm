@@ -210,10 +210,11 @@ class IngestPipeline:
         """CR 阶段：为每个 child chunk 生成 context 前缀（客观定位）。"""
         from agents_rag.ingestion.fingerprint import text_fingerprint
 
+        doc_title = document.sections[0].heading if document.sections else document.source
         new_children = []
         for c in children:
-            sec = f" · 章节：{c.section_path}" if c.section_path else ""
-            doc_context = f"文档：{document.source}{sec}"
+            heading = f" · 标题：{c.heading}" if c.heading else ""
+            doc_context = f"文档：《{doc_title}》· 章节：{c.section_path}{heading}"
             ctx = self.contextualizer.contextualize(
                 c.text,
                 doc_context,
