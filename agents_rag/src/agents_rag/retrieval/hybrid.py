@@ -12,16 +12,18 @@ _RRF_K = 60
 
 
 def rrf_fuse(
-    vector_results: list[RetrievalResult],
-    bm25_results: list[RetrievalResult],
-    *,
+    *rankings: list[RetrievalResult],
     k: int = _RRF_K,
 ) -> list[RetrievalResult]:
-    """RRF：对两路结果按排名倒数求和，只保留最佳结果对象。"""
+    """RRF：对任意 N 路排名列表按排名倒数求和融合。
+
+    不关心每路来源（vector / bm25 / 不同 query 视角均可）——只看每路排名。
+    用排名不用分数，规避 distance vs score 量纲相反问题。k=60 经验值。
+    """
     scores: dict[str, float] = {}
     best: dict[str, RetrievalResult] = {}
 
-    for results in (vector_results, bm25_results):
+    for results in rankings:
         for rank, r in enumerate(results):
             cid = r.chunk_id
             scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank + 1)

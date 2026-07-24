@@ -12,8 +12,9 @@ from agents_rag.citation.checker import CitationChecker
 from agents_rag.citation.faithfulness import FaithfulnessChecker
 from agents_rag.generation.context_builder import ContextBuilder
 from agents_rag.generation.llm import Generator
-from agents_rag.models import Answer, AnswerStatus
-from agents_rag.retrieval.hybrid import HybridRetriever
+from agents_rag.models import Answer, AnswerStatus, RetrievalResult
+from agents_rag.retrieval.hybrid import HybridRetriever, rrf_fuse
+from agents_rag.retrieval.query_rewriter import QueryRewriter
 from agents_rag.retrieval.reranker import Reranker
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class QueryPipeline:
         generator: Generator,
         citation_checker: CitationChecker,
         faithfulness_checker: FaithfulnessChecker | None = None,
+        rewriter: QueryRewriter | None = None,
         confidence_enabled: bool = False,
         confidence_threshold: float = 0.5,
         confidence_weight_rerank: float = 0.3,
@@ -44,6 +46,7 @@ class QueryPipeline:
         self._generator = generator
         self._citation_checker = citation_checker
         self._faithfulness_checker = faithfulness_checker
+        self._rewriter = rewriter
         self._confidence_enabled = confidence_enabled
         self._confidence_threshold = confidence_threshold
         self._w_rerank = confidence_weight_rerank
@@ -57,8 +60,8 @@ class QueryPipeline:
         """查询管线：问题 → 带引用的可信回答。"""
         k = max(self._vector_top_k, self._bm25_top_k)
 
-        # ①②③ 双路召回 + RRF 融合
-        fused = self._retriever.retrieve(query, k=k)
+        # ①' 查询改写（可选）→ ①②③ 双路召回 + RRF 融合（双 query 融合）
+        fused = self._retrieve_fused(query, k)
         if not fused:
             return Answer(
                 text="",
@@ -100,6 +103,19 @@ class QueryPipeline:
             answer = self._aggregate_confidence(answer, id_map)
 
         return answer
+
+    def _retrieve_fused(self, query: str, k: int) -> list[RetrievalResult]:
+        """查询改写（可选）+ 双 query RRF 融合；失败/无改写回退原 query 单路。"""
+        original = self._retriever.retrieve(query, k=k)
+        if self._rewriter is None:
+            return original
+        rewritten = self._rewriter.rewrite(query)
+        if not rewritten or rewritten.strip() == query.strip():
+            return original  # 改写失败(None) / 已规范 → 走原路
+        rewritten_fused = self._retriever.retrieve(rewritten, k=k)
+        if not rewritten_fused:
+            return original  # 改写路空 → 用原路
+        return rrf_fuse(original, rewritten_fused)[:k]
 
     def _aggregate_confidence(self, answer: Answer, id_map: dict) -> Answer:
         """三信号加权聚合 → confidence → answered/low_confidence。"""

@@ -32,6 +32,16 @@ def test_rrf_fuse_empty():
     assert rrf_fuse([], []) == []
 
 
+def test_rrf_fuse_n_lists():
+    """N 路通用融合（不只 2 路）：多路共有的 chunk 排名最高。"""
+    a = [_result("x", "X")]
+    b = [_result("x", "X"), _result("y", "Y")]
+    c = [_result("z", "Z")]
+    fused = rrf_fuse(a, b, c)
+    assert fused[0].chunk_id == "x"  # a、b 两路都靠前 → 最高
+    assert {r.chunk_id for r in fused} == {"x", "y", "z"}
+
+
 # —— ContextBuilder ——
 def test_context_builder_dedup_and_numbering():
     results = [
@@ -115,3 +125,68 @@ def test_query_pipeline_empty_no_result():
     answer = pipe.ask("不存在的问题")
     assert answer.status == AnswerStatus.NO_RESULT
     assert "未找到" in answer.message
+
+
+# —— 查询改写（双 query 融合 / 回退）——
+class _RecordingRetriever(Retriever):
+    """记录每次 retrieve 的 query（验证双 query 调用次数）。"""
+
+    def __init__(self, results):
+        self._results = results
+        self.queries: list[str] = []
+
+    def retrieve(self, query, k=20):
+        self.queries.append(query)
+        return self._results
+
+
+class _FakeRewriter:
+    """假 QueryRewriter：rewrite 固定返回。"""
+
+    def __init__(self, rewritten):
+        self._rewritten = rewritten
+
+    def rewrite(self, query):
+        return self._rewritten
+
+
+def _make_pipe(results, rewriter=None):
+    vec = _RecordingRetriever(results)
+    bm25 = _RecordingRetriever(results)
+    pipe = QueryPipeline(
+        hybrid_retriever=HybridRetriever(vec, bm25),
+        reranker=_FakeReranker(),
+        context_builder=ContextBuilder(parent_store=None, max_tokens=10000),
+        generator=_FakeGenerator(),
+        citation_checker=CitationChecker(),
+        rewriter=rewriter,
+    )
+    return pipe, vec
+
+
+def test_pipeline_rewrite_dual_query():
+    """改写开启 + 改写有效 → 原 query 与改写 query 各检索一次（双 query 融合）。"""
+    pipe, vec = _make_pipe([_result("a", "内容")], rewriter=_FakeRewriter("账户密码重置"))
+    pipe.ask("密码咋办")
+    assert vec.queries == ["密码咋办", "账户密码重置"]
+
+
+def test_pipeline_rewrite_fallback_none():
+    """改写返回 None（失败）→ 仅原 query 检索一次（回退，不阻塞）。"""
+    pipe, vec = _make_pipe([_result("a", "内容")], rewriter=_FakeRewriter(None))
+    pipe.ask("问题")
+    assert vec.queries == ["问题"]
+
+
+def test_pipeline_rewrite_fallback_unchanged():
+    """改写 == 原 query（LLM 判定已规范）→ 仅原 query 检索一次（省检索）。"""
+    pipe, vec = _make_pipe([_result("a", "内容")], rewriter=_FakeRewriter("embedding-3 维度"))
+    pipe.ask("embedding-3 维度")
+    assert vec.queries == ["embedding-3 维度"]
+
+
+def test_pipeline_no_rewriter_behavior_unchanged():
+    """rewriter=None → 仅原 query 检索一次（行为与基线一致）。"""
+    pipe, vec = _make_pipe([_result("a", "内容")], rewriter=None)
+    pipe.ask("问题")
+    assert vec.queries == ["问题"]

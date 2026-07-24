@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     confidence_weight_citation: float = 0.3
     confidence_weight_faithfulness: float = 0.4
 
+    # 查询改写（Flash 把口语/模糊 query 改写为检索友好，默认关）
+    query_rewrite_enabled: bool = False
+    query_rewrite_model: str = "GLM-4.7-Flash"
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64

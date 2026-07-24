@@ -28,6 +28,7 @@ from agents_rag.retrieval.hybrid import HybridRetriever
 from agents_rag.retrieval.vector import VectorRetriever
 from agents_rag.retrieval.bm25 import BM25Retriever
 from agents_rag.retrieval.reranker import ZhipuReranker
+from agents_rag.retrieval.query_rewriter import QueryRewriter
 from agents_rag.generation.context_builder import ContextBuilder
 from agents_rag.generation.llm import OpenAIGenerator
 from agents_rag.citation.checker import CitationChecker
@@ -150,6 +151,15 @@ def ask(
             if settings.faithfulness_enabled
             else None
         )
+        rewriter = (
+            QueryRewriter(
+                api_key=api_key,
+                base_url=settings.llm_base_url,
+                model=settings.query_rewrite_model,
+            )
+            if settings.query_rewrite_enabled
+            else None
+        )
         pipe = QueryPipeline(
             hybrid_retriever=HybridRetriever(
                 VectorRetriever(embedder, store),
@@ -171,6 +181,7 @@ def ask(
             ),
             citation_checker=CitationChecker(),
             faithfulness_checker=faithfulness_checker,
+            rewriter=rewriter,
             confidence_enabled=settings.confidence_enabled,
             confidence_threshold=settings.confidence_threshold,
             confidence_weight_rerank=settings.confidence_weight_rerank,
