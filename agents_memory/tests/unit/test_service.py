@@ -1,6 +1,15 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agents_memory.models import MemoryRecord, MemoryScope, MemoryType
+from agents_memory.models import (
+    CandidateMemory,
+    MemoryRecord,
+    MemoryScope,
+    MemoryType,
+    PendingResolution,
+    RelationKind,
+    SourceKind,
+)
 from agents_memory.service import MemoryService
 from agents_memory.storage.repository import MemoryRepository
 
@@ -43,3 +52,39 @@ def test_service_lists_shows_deletes_and_syncs(tmp_path: Path) -> None:
     assert coordinator.deleted == [("m1", "u1")]
     assert service.repair_index() == 2
     assert service.rebuild_index() == 3
+
+
+def test_service_observes_and_sweeps_pending_by_exact_scope(
+    tmp_path: Path,
+) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    now = datetime.now(UTC)
+    pending = PendingResolution(
+        id="pr-1",
+        scope=MemoryScope(user_id="u1", agent_id="a1", session_id="s1"),
+        candidate=CandidateMemory(
+            content="后来取消了",
+            type=MemoryType.EVENT,
+            importance=4,
+            confidence=0.8,
+            source_message_ids=("m1",),
+            source_kind=SourceKind.USER_EXPLICIT,
+        ),
+        semantic_relation=RelationKind.CONTRADICT,
+        importance=4,
+        created_at=now - timedelta(hours=2),
+        expires_at=now - timedelta(seconds=1),
+    )
+    repository.save_pending_resolution(pending)
+    service = MemoryService(repository)
+
+    views = service.list_pending_resolutions(pending.scope, now=now)
+
+    assert len(views) == 1
+    assert views[0].resolution_id == "pr-1"
+    assert views[0].age_seconds == 7200
+    assert (
+        service.list_pending_resolutions(MemoryScope(user_id="u1"), now=now)
+        == []
+    )
+    assert service.sweep_pending_resolutions(now=now) == 1

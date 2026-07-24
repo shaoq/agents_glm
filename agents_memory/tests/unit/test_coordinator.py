@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -7,11 +8,18 @@ from agents_memory.models import (
     Action,
     ActionPlan,
     CandidateMemory,
+    EventFrame,
+    EventStatus,
     IndexOperationStatus,
+    MemoryRecord,
     MemoryScope,
     MemoryType,
     Message,
+    PendingResolution,
+    PendingResolutionStatus,
+    RelationKind,
     SourceKind,
+    Validity,
     WriteStatus,
 )
 from agents_memory.storage.coordinator import RequestAlreadyReserved, StorageCoordinator
@@ -242,3 +250,157 @@ def test_nonretryable_index_mismatch_is_not_repair_loop(tmp_path: Path) -> None:
     assert report.status is WriteStatus.FAILED
     assert not report.retryable
     assert coordinator.repair_index() == 0
+
+
+def test_defer_persists_resolution_without_memory_or_index_operation(
+    tmp_path: Path,
+) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    index = ToggleIndex()
+    coordinator = StorageCoordinator(repository, index, FakeEmbedder(3))
+    now = datetime.now(UTC)
+    deferred_candidate = candidate().model_copy(
+        update={
+            "type": MemoryType.EVENT,
+            "content": "用户不去北京了",
+            "event_frame": EventFrame(status=EventStatus.CANCELLED),
+        }
+    )
+    pending = PendingResolution(
+        id="pr-1",
+        scope=MemoryScope(user_id="u1"),
+        candidate=deferred_candidate,
+        conflicting_memory_ids=("old",),
+        semantic_relation=RelationKind.CONTRADICT,
+        missing_dimensions=("event_time",),
+        source_message_ids=("m1",),
+        processed_evidence_message_ids=("m1",),
+        importance=8,
+        status=PendingResolutionStatus.OPEN,
+        created_at=now,
+        updated_at=now,
+        last_evaluated_at=now,
+        expires_at=now + timedelta(days=30),
+    )
+
+    report = coordinator.commit(
+        request_id="req-defer",
+        input_hash="hash",
+        scope=pending.scope,
+        plans=[
+            ActionPlan(
+                candidate_index=0,
+                candidate=deferred_candidate,
+                action=Action.DEFER,
+                target_ids=("old",),
+                pending_resolution=pending,
+            )
+        ],
+        messages=[Message(message_id="m1", role="user", content="不去了")],
+        embeddings={0: [1.0, 0.0, 0.0]},
+        extracted_count=1,
+        filtered_count=0,
+    )
+
+    assert report.status is WriteStatus.SUCCESS
+    assert report.results[0].action is Action.DEFER
+    assert report.results[0].resolution_id == "pr-1"
+    assert repository.get_pending_resolution("pr-1") == pending
+    assert repository.list_memories(pending.scope) == []
+    assert repository.list_index_operations() == []
+    assert index.items == {}
+
+
+def test_pending_and_memory_changes_roll_back_together_on_precommit_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    coordinator = StorageCoordinator(repository, ToggleIndex(), FakeEmbedder(3))
+    now = datetime.now(UTC)
+    deferred_candidate = candidate().model_copy(
+        update={"type": MemoryType.EVENT}
+    )
+    pending = PendingResolution(
+        id="pr-rollback",
+        scope=MemoryScope(user_id="u1"),
+        candidate=deferred_candidate,
+        semantic_relation=RelationKind.CONTRADICT,
+        importance=8,
+        expires_at=now + timedelta(days=30),
+    )
+
+    def fail_save_request(*_args, **_kwargs):
+        raise RuntimeError("stop before commit")
+
+    monkeypatch.setattr(repository, "save_request", fail_save_request)
+
+    with pytest.raises(RuntimeError, match="stop before commit"):
+        coordinator.commit(
+            request_id="req-rollback",
+            input_hash="hash",
+            scope=pending.scope,
+            plans=[
+                ActionPlan(
+                    candidate_index=0,
+                    candidate=deferred_candidate,
+                    action=Action.DEFER,
+                    pending_resolution=pending,
+                ),
+                ActionPlan(
+                    candidate_index=1,
+                    candidate=candidate(),
+                    action=Action.ADD,
+                ),
+            ],
+            messages=[
+                Message(message_id="m1", role="user", content="mixed")
+            ],
+            embeddings={1: [1.0, 0.0, 0.0]},
+            extracted_count=2,
+            filtered_count=0,
+        )
+
+    assert repository.get_pending_resolution("pr-rollback") is None
+    assert repository.list_memories(pending.scope) == []
+    assert repository.list_index_operations() == []
+
+
+def test_update_rolls_back_when_target_is_no_longer_active(
+    tmp_path: Path,
+) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    old = MemoryRecord(
+        id="old",
+        scope=MemoryScope(user_id="u1"),
+        type=MemoryType.FACT,
+        content="old",
+        importance=8,
+        confidence=0.9,
+        validity=Validity.SUPERSEDED,
+    )
+    repository.save_memory(old)
+    coordinator = StorageCoordinator(repository, ToggleIndex(), FakeEmbedder(3))
+
+    with pytest.raises(RuntimeError, match="active"):
+        coordinator.commit(
+            request_id="req-stale",
+            input_hash="hash",
+            scope=old.scope,
+            plans=[
+                ActionPlan(
+                    candidate_index=0,
+                    candidate=candidate(),
+                    action=Action.UPDATE,
+                    target_ids=("old",),
+                    relation=RelationKind.CONTRADICT,
+                )
+            ],
+            messages=[
+                Message(message_id="m1", role="user", content="new")
+            ],
+            embeddings={0: [1.0, 0.0, 0.0]},
+            extracted_count=1,
+            filtered_count=0,
+        )
+
+    assert len(repository.list_memories(old.scope, include_history=True)) == 1

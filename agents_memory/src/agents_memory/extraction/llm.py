@@ -7,6 +7,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from agents_memory.extraction.prompts import EXTRACTION_SYSTEM_PROMPT
 from agents_memory.models import CandidateMemory, Message, SourceKind
+from agents_memory.processing.temporal import normalize_temporal_anchor
 
 
 class ExtractionOutputError(ValueError):
@@ -64,7 +65,7 @@ class LLMFactExtractor:
         if envelope is None:
             raise ExtractionOutputError("invalid extraction output") from last_error
         self._validate_sources(envelope.candidates, messages)
-        return envelope.candidates
+        return self._normalize_event_times(envelope.candidates, messages)
 
     @retry(
         retry=retry_if_exception_type(
@@ -106,3 +107,33 @@ class LLMFactExtractor:
                 message.role == "tool" for message in supporting
             ):
                 raise SourceAttributionError("tool fact must be supported by a tool message")
+
+    @staticmethod
+    def _normalize_event_times(
+        candidates: list[CandidateMemory], messages: list[Message]
+    ) -> list[CandidateMemory]:
+        by_id = {message.message_id: message for message in messages}
+        normalized: list[CandidateMemory] = []
+        for candidate in candidates:
+            frame = candidate.event_frame
+            raw_text = frame.temporal_anchor.raw_text if frame else None
+            if frame is None or not raw_text:
+                normalized.append(candidate)
+                continue
+            reference = next(
+                (
+                    by_id[message_id].occurred_at
+                    for message_id in candidate.source_message_ids
+                    if by_id[message_id].occurred_at is not None
+                ),
+                None,
+            )
+            anchor = normalize_temporal_anchor(raw_text, reference)
+            normalized.append(
+                candidate.model_copy(
+                    update={"event_frame": frame.model_copy(
+                        update={"temporal_anchor": anchor}
+                    )}
+                )
+            )
+        return normalized

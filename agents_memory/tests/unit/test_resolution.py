@@ -2,7 +2,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents_memory.models import CandidateMemory, MemoryRecord, MemoryScope, MemoryType, SourceKind
+from agents_memory.models import (
+    CandidateMemory,
+    EventFrame,
+    EventIdentity,
+    EventStatus,
+    MemoryRecord,
+    MemoryScope,
+    MemoryType,
+    SourceKind,
+    TemporalRelation,
+)
 from agents_memory.resolution.llm import LLMRelationResolver, RelationOutputError
 
 
@@ -25,6 +35,36 @@ def history(memory_id: str) -> MemoryRecord:
         content="用户住在上海",
         importance=8,
         confidence=0.9,
+    )
+
+
+def event_candidate() -> CandidateMemory:
+    return candidate().model_copy(
+        update={
+            "content": "用户取消明天的北京行程",
+            "type": MemoryType.EVENT,
+            "event_frame": EventFrame(
+                actor="user",
+                predicate="travel",
+                object="北京",
+                status=EventStatus.CANCELLED,
+            ),
+        }
+    )
+
+
+def event_history(memory_id: str = "old") -> MemoryRecord:
+    return history(memory_id).model_copy(
+        update={
+            "content": "用户计划明天去北京",
+            "type": MemoryType.EVENT,
+            "event_frame": EventFrame(
+                actor="user",
+                predicate="travel",
+                object="北京",
+                status=EventStatus.PLANNED,
+            ),
+        }
     )
 
 
@@ -107,3 +147,67 @@ def test_relation_resolver_repairs_semantically_invalid_output_once() -> None:
 
     assert resolver.resolve(candidate(), [history("old")])[0].memory_id == "old"
     assert calls == 2
+
+
+def test_event_relation_resolver_parses_multidimensional_relation() -> None:
+    result = LLMRelationResolver(
+        client=client_with(
+            """
+            {"relations":[{
+              "memory_id":"old",
+              "relation":"contradict",
+              "identity":"same_event",
+              "temporal":"same_window",
+              "confidence":0.92,
+              "reason":"同一北京行程状态变化"
+            }]}
+            """
+        ),
+        model="flash",
+    ).resolve(event_candidate(), [event_history()])
+
+    assert result[0].identity is EventIdentity.SAME_EVENT
+    assert result[0].temporal is TemporalRelation.SAME_WINDOW
+    assert result[0].confidence == 0.92
+
+
+def test_event_relation_resolver_requires_identity_and_temporal_dimensions() -> None:
+    resolver = LLMRelationResolver(
+        client=client_with(
+            '{"relations":[{"memory_id":"old","relation":"contradict"}]}'
+        ),
+        model="flash",
+    )
+
+    with pytest.raises(RelationOutputError):
+        resolver.resolve(event_candidate(), [event_history()])
+
+
+def test_event_relation_payload_contains_history_event_frame() -> None:
+    payload = {}
+
+    def create(**kwargs):
+        payload.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(
+                            '{"relations":[{"memory_id":"old",'
+                            '"relation":"none","identity":"different_event",'
+                            '"temporal":"after"}]}'
+                        )
+                    )
+                )
+            ]
+        )
+
+    resolver = LLMRelationResolver(
+        client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        ),
+        model="flash",
+    )
+    resolver.resolve(event_candidate(), [event_history()])
+
+    assert "event_frame" in payload["messages"][1]["content"]

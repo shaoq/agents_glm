@@ -3,7 +3,7 @@
 | 项 | 值 |
 |----|----|
 | 日期 | 2026-07-24 |
-| 状态 | 已批准，待提案与实现 |
+| 状态 | 核心写入管线已实现，事件待消解扩展已实现 |
 | 范围 | Memory 写入管线首期核心闭环 |
 | 交付形态 | 独立 Python 包 + CLI 演示 |
 | 运行环境 | conda 环境 `agents_glm`（Python 3.12.13） |
@@ -19,7 +19,7 @@
 - 本轮具体交付什么，做到哪里停止；
 - 写入过程由哪些组件负责，各组件如何协作；
 - 数据、状态、一致性和失败恢复如何定义；
-- 如何验证实现真正覆盖 ADD / UPDATE / NOOP 等核心语义。
+- 如何验证实现真正覆盖 ADD / UPDATE / NOOP / DEFER 等核心语义。
 
 知识原理与方案取舍见[记忆写入管线知识笔记](../knowledge/memory-write-pipeline.md)，本文不重复展开。
 
@@ -39,7 +39,7 @@
   → 候选质量处理与批内查重
   → 历史记忆查找
   → 语义关系判断
-  → ADD / UPDATE / NOOP 决策
+  → ADD / UPDATE / NOOP / DEFER 决策
   → SQLite 真相源写入
   → Chroma 语义索引同步
   → WriteReport
@@ -50,10 +50,12 @@
 1. 只将有来源、可复用且具备足够确定性的事实写入长期记忆；
 2. 同时处理“候选与历史”和“同批候选之间”的重复；
 3. 区分 duplicate / supplement / contradict / correct；
-4. 以 ADD / UPDATE / NOOP 表达业务动作；
+4. 以 ADD / UPDATE / NOOP / DEFER 表达业务动作；
 5. UPDATE 保留历史，并明确当前有效性，而不是静默覆盖；
 6. SQLite 与 Chroma 部分失败后可以通过幂等重试收敛；
-7. CLI 能展示各候选的判断依据和最终结果。
+7. CLI 能展示各候选的判断依据和最终结果；
+8. event 使用 EventFrame、事件身份和时间关系，证据不足时持久化 DEFER；
+9. 后续同 scope 的自然消息可静默消解，维护扫描只处理生命周期。
 
 ### 1.2 必须跑通的场景
 
@@ -284,7 +286,7 @@ created_at
 - 每个候选的批内处理结果；
 - 检索到的历史 ID 与相似度；
 - 关系判断摘要；
-- 最终动作 ADD / UPDATE / NOOP；
+- 最终动作 ADD / UPDATE / NOOP / DEFER；
 - 新旧记忆 ID；
 - SQLite 提交结果；
 - Chroma 同步状态；
@@ -336,7 +338,8 @@ created_at
 
 - UPDATE 是业务动作，不等于原地覆盖；
 - fact 可因当前状态变化而 UPDATE；
-- event 通常按时间序列 ADD，只有用户明确指出历史事件记错时才 correct；
+- event 先判断事件身份：different_event 才按时间序列 ADD，same_event 状态演化
+  执行 UPDATE，身份未知且冲突时 DEFER；
 - 若一个候选同时与多条 active 记录形成无法确定的混合关系，拒绝自动写入并报告歧义；
 - 不能采用“任一 duplicate 即 NOOP”的简单优先级；
 - 候选若同时包含补充和矛盾信息，应优先视为粒度异常，而不是猜测动作。

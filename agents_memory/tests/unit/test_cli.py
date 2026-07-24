@@ -7,6 +7,7 @@ from agents_memory.cli import create_app
 from agents_memory.models import (
     MemoryRecord,
     MemoryType,
+    PendingResolutionStatus,
     WriteReport,
     WriteStatus,
 )
@@ -46,6 +47,12 @@ class StubService:
 
     def rebuild_index(self):
         return 3
+
+    def list_pending_resolutions(self, scope, status=PendingResolutionStatus.OPEN):
+        return []
+
+    def sweep_pending_resolutions(self):
+        return 2
 
 
 def test_cli_write_outputs_json(tmp_path: Path) -> None:
@@ -113,3 +120,27 @@ def test_cli_list_uses_sqlite_only_runtime(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
+
+
+def test_cli_pending_list_and_sweep() -> None:
+    runner = CliRunner()
+    app = create_app(StubPipeline(), StubService())
+
+    listed = runner.invoke(
+        app,
+        [
+            "pending",
+            "list",
+            "--user-id",
+            "u1",
+            "--status",
+            "open",
+            "--json-output",
+        ],
+    )
+    swept = runner.invoke(app, ["pending", "sweep"])
+
+    assert listed.exit_code == 0
+    assert json.loads(listed.stdout) == []
+    assert swept.exit_code == 0
+    assert "2" in swept.stdout

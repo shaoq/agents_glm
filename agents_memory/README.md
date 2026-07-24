@@ -8,14 +8,19 @@
 ## 写入流程
 
 ```text
-消息 → 事实抽取 → 来源与候选校验 → 批内去重 → Chroma 查找
-    → 语义关系判断 → ADD / UPDATE / NOOP → SQLite 提交 → Chroma 同步
+消息 → 事实/事件抽取 → 来源与候选校验 → 待决项静默回查
+    → Chroma 查找 → 多维关系判断 → ADD / UPDATE / NOOP / DEFER
+    → SQLite 提交 → Chroma 同步
 ```
 
 - `duplicate` → NOOP；
 - `supplement` → ADD；
 - `contradict` → UPDATE，旧记录 `superseded`；
 - `correct` → UPDATE，旧记录 `retracted`；
+- event 先判断 `same_event / different_event / unknown`，再解释语义关系；
+- `unknown + contradict` → DEFER，不猜测 ADD 或 UPDATE；
+- DEFER 只写入 SQLite 的 `PendingResolution`，不进入 active memory 或 Chroma；
+- 后续同 scope 的自然消息会在普通候选决策前静默尝试消解；
 - UPDATE 追加新记录并保留历史关系，不原地覆盖；
 - SQLite 是唯一真相源，Chroma 是可修复、可重建的派生索引。
 
@@ -47,7 +52,8 @@ cp .env.example .env
     {
       "message_id": "msg-1",
       "role": "user",
-      "content": "请记住，我目前主要使用 Python。"
+      "content": "我明天计划去北京。",
+      "occurred_at": "2026-07-24T09:00:00+08:00"
     }
   ]
 }
@@ -68,6 +74,11 @@ agents-memory write --json-output < input.json
 
 同一个 `request_id` 必须始终对应相同输入。重复成功请求直接返回已保存的 `WriteReport`；
 若 SQLite 已提交而 Chroma 尚未完成，同一请求只重试索引同步。
+同一 scope 内的 `message_id` 也必须稳定且不可复用为不同内容，待消解流程用它识别已经处理过的
+自然证据；检测到同 ID 不同内容时请求会被拒绝，而不会静默覆盖旧来源。
+
+`occurred_at` 可选，是“明天、昨天、上周”等相对事件时间的参考。缺少该字段时，
+系统保留原始时间表达并标记 unresolved，不使用记忆写入时间代替事件时间。
 
 ## 查看与删除
 
@@ -80,6 +91,24 @@ agents-memory delete MEMORY_ID --user-id user-1
 
 `list` 默认只返回 `active`。`--history` 同时显示 `superseded` 和 `retracted`。
 删除会校验 `user_id`，并同时清理 SQLite 真相和 Chroma 派生索引。
+
+## 待消解项
+
+```bash
+# 精确 scope 查看 open pending，输出包含年龄、价值、原因与过期时间
+agents-memory pending list --user-id user-1 --agent-id assistant-1 \
+  --session-id session-9 --status open --json-output
+
+# 仅执行到期和目标失效检查；没有新证据时不会调用 LLM
+agents-memory pending sweep
+
+# 删除指定时间之前已 resolved/expired/obsolete 的终态记录
+agents-memory pending cleanup --before 2026-08-01T00:00:00+08:00
+```
+
+TTL 可通过 `PENDING_HIGH_TTL_DAYS`、`PENDING_NORMAL_TTL_DAYS` 和
+`PENDING_LOW_TTL_DAYS` 配置，默认分别为 30、7、1 天。过期或 obsolete 不会创建记忆，
+也不会改变旧记忆。
 
 ## 索引恢复
 

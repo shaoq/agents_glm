@@ -8,6 +8,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from agents_memory.models import (
     CandidateMemory,
     MemoryRecord,
+    MemoryType,
     RelationKind,
     RelationMatch,
 )
@@ -43,7 +44,15 @@ class LLMRelationResolver:
         payload = {
             "candidate": candidate.model_dump(mode="json"),
             "histories": [
-                {"id": record.id, "content": record.content, "type": record.type.value}
+                {
+                    "id": record.id,
+                    "content": record.content,
+                    "type": record.type.value,
+                    "event_frame": record.event_frame.model_dump(mode="json")
+                    if record.event_frame
+                    else None,
+                    "created_at": record.created_at.isoformat(),
+                }
                 for record in histories
             ],
         }
@@ -76,6 +85,12 @@ class LLMRelationResolver:
                     ):
                         raise RelationOutputError(
                             "relation output references invalid memory"
+                        )
+                    if candidate.type is MemoryType.EVENT and (
+                        relation.identity is None or relation.temporal is None
+                    ):
+                        raise RelationOutputError(
+                            "event relation requires identity and temporal dimensions"
                         )
                     seen.add(relation.memory_id)
                 if seen != allowed:

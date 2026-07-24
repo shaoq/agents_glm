@@ -16,6 +16,7 @@ from agents_memory.models import (
     MemorySource,
     Message,
     RelationKind,
+    SourceKind,
     Validity,
     WriteReport,
     WriteStatus,
@@ -60,13 +61,55 @@ class StorageCoordinator:
             ):
                 raise RequestAlreadyReserved(request_id)
             for plan in plans:
+                if plan.pending_resolution is not None:
+                    by_message.update(
+                        {
+                            message.message_id: message
+                            for message in plan.pending_resolution.source_messages
+                        }
+                    )
+                if plan.action is Action.DEFER:
+                    pending = plan.pending_resolution
+                    if pending is None:
+                        raise ValueError("DEFER plan requires pending resolution")
+                    self.repository.save_pending_resolution(
+                        pending, connection=connection
+                    )
+                    results.append(
+                        CandidateResult(
+                            candidate_index=plan.candidate_index,
+                            content=plan.candidate.content,
+                            action=Action.DEFER,
+                            resolution_id=pending.id,
+                            resolution_status=pending.status,
+                            replaced_memory_ids=plan.target_ids,
+                            matches=plan.matches,
+                            missing_dimensions=pending.missing_dimensions,
+                            reason=plan.reason or pending.reason,
+                        )
+                    )
+                    continue
                 if plan.action is Action.NOOP:
+                    if plan.pending_resolution is not None:
+                        self.repository.save_pending_resolution(
+                            plan.pending_resolution, connection=connection
+                        )
                     results.append(
                         CandidateResult(
                             candidate_index=plan.candidate_index,
                             content=plan.candidate.content,
                             action=Action.NOOP,
                             memory_id=plan.target_ids[0] if plan.target_ids else None,
+                            resolution_id=(
+                                plan.pending_resolution.id
+                                if plan.pending_resolution
+                                else None
+                            ),
+                            resolution_status=(
+                                plan.pending_resolution.status
+                                if plan.pending_resolution
+                                else None
+                            ),
                             replaced_memory_ids=plan.target_ids,
                             matches=plan.matches,
                             reason=plan.reason,
@@ -87,6 +130,7 @@ class StorageCoordinator:
                     created_at=now,
                     updated_at=now,
                     valid_from=now,
+                    event_frame=plan.candidate.event_frame,
                     metadata=plan.candidate.metadata,
                 )
                 sources = tuple(
@@ -94,7 +138,14 @@ class StorageCoordinator:
                         memory_id=memory_id,
                         message_id=message_id,
                         role=by_message[message_id].role,
-                        source_kind=plan.candidate.source_kind,
+                        source_kind=SourceKind(
+                            plan.candidate.metadata.get(
+                                "_source_kinds", {}
+                            ).get(
+                                message_id,
+                                plan.candidate.source_kind.value,
+                            )
+                        ),
                         excerpt=by_message[message_id].content,
                     )
                     for message_id in plan.candidate.source_message_ids
@@ -137,12 +188,26 @@ class StorageCoordinator:
                     connection=connection,
                 )
                 initial_embeddings[memory_id] = embeddings[plan.candidate_index]
+                if plan.pending_resolution is not None:
+                    self.repository.save_pending_resolution(
+                        plan.pending_resolution, connection=connection
+                    )
                 results.append(
                     CandidateResult(
                         candidate_index=plan.candidate_index,
                         content=plan.candidate.content,
                         action=plan.action,
                         memory_id=memory_id,
+                        resolution_id=(
+                            plan.pending_resolution.id
+                            if plan.pending_resolution
+                            else None
+                        ),
+                        resolution_status=(
+                            plan.pending_resolution.status
+                            if plan.pending_resolution
+                            else None
+                        ),
                         replaced_memory_ids=plan.target_ids,
                         matches=plan.matches,
                         reason=plan.reason,

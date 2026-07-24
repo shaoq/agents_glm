@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from datetime import UTC, datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_memory.models import (
     MemoryRecord,
@@ -6,6 +8,7 @@ from agents_memory.models import (
     MemoryScope,
     MemorySource,
     MemoryType,
+    PendingResolutionStatus,
 )
 from agents_memory.storage.coordinator import StorageCoordinator
 from agents_memory.storage.repository import MemoryRepository
@@ -18,6 +21,19 @@ class MemoryDetail(BaseModel):
     sources: tuple[MemorySource, ...]
     relations: tuple[MemoryRelation, ...]
     history: tuple[MemoryRecord, ...]
+
+
+class PendingResolutionView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    resolution_id: str
+    status: PendingResolutionStatus
+    age_seconds: int = Field(ge=0)
+    importance: int = Field(ge=1, le=10)
+    reason: str
+    missing_dimensions: tuple[str, ...]
+    last_evaluated_at: datetime | None
+    expires_at: datetime
 
 
 class MemoryService:
@@ -70,3 +86,35 @@ class MemoryService:
         if self.coordinator is None:
             raise RuntimeError("storage coordinator is required")
         return self.coordinator.rebuild_index()
+
+    def list_pending_resolutions(
+        self,
+        scope: MemoryScope,
+        status: PendingResolutionStatus | None = PendingResolutionStatus.OPEN,
+        *,
+        now: datetime | None = None,
+    ) -> list[PendingResolutionView]:
+        current = now or datetime.now(UTC)
+        return [
+            PendingResolutionView(
+                resolution_id=item.id,
+                status=item.status,
+                age_seconds=max(
+                    0, int((current - item.created_at).total_seconds())
+                ),
+                importance=item.importance,
+                reason=item.reason,
+                missing_dimensions=item.missing_dimensions,
+                last_evaluated_at=item.last_evaluated_at,
+                expires_at=item.expires_at,
+            )
+            for item in self.repository.list_pending_resolutions(scope, status)
+        ]
+
+    def sweep_pending_resolutions(
+        self, *, now: datetime | None = None
+    ) -> int:
+        return self.repository.sweep_pending_resolutions(now=now)
+
+    def cleanup_pending_resolutions(self, *, before: datetime) -> int:
+        return self.repository.cleanup_pending_resolutions(before=before)

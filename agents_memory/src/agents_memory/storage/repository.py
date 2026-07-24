@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from agents_memory.models import (
+    EventFrame,
     IndexOperation,
     IndexOperationKind,
     IndexOperationStatus,
@@ -16,6 +17,8 @@ from agents_memory.models import (
     MemoryScope,
     MemorySource,
     MemoryType,
+    PendingResolution,
+    PendingResolutionStatus,
     RelationKind,
     SourceKind,
     Validity,
@@ -24,6 +27,10 @@ from agents_memory.models import (
 
 
 class IdempotencyConflict(ValueError):
+    pass
+
+
+class StaleMemoryState(RuntimeError):
     pass
 
 
@@ -71,6 +78,7 @@ class MemoryRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     valid_from TEXT,
+                    event_frame_json TEXT,
                     metadata_json TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_memories_scope
@@ -118,6 +126,34 @@ class MemoryRepository:
                 ON index_operations(status, updated_at);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(memories)").fetchall()
+            }
+            if "event_frame_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE memories ADD COLUMN event_frame_json TEXT"
+                )
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS pending_resolutions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    agent_id TEXT,
+                    session_id TEXT,
+                    status TEXT NOT NULL,
+                    importance INTEGER NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pending_scope_status
+                ON pending_resolutions(
+                    user_id, agent_id, session_id, status, expires_at
+                );
+                UPDATE schema_version SET version = 2 WHERE version < 2;
+                """
+            )
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -146,8 +182,9 @@ class MemoryRepository:
                 """
                 INSERT INTO memories (
                     id, user_id, agent_id, session_id, type, content, importance,
-                    confidence, validity, created_at, updated_at, valid_from, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    confidence, validity, created_at, updated_at, valid_from,
+                    event_frame_json, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -162,6 +199,9 @@ class MemoryRepository:
                     record.created_at.isoformat(),
                     record.updated_at.isoformat(),
                     record.valid_from.isoformat() if record.valid_from else None,
+                    record.event_frame.model_dump_json()
+                    if record.event_frame
+                    else None,
                     json.dumps(record.metadata, ensure_ascii=False, sort_keys=True),
                 ),
             )
@@ -285,11 +325,21 @@ class MemoryRepository:
         conn = connection or self._connect()
         try:
             result = conn.execute(
-                "UPDATE memories SET validity = ?, updated_at = ? WHERE id = ?",
-                (validity.value, datetime.now(UTC).isoformat(), memory_id),
+                """
+                UPDATE memories SET validity = ?, updated_at = ?
+                WHERE id = ? AND validity = ?
+                """,
+                (
+                    validity.value,
+                    datetime.now(UTC).isoformat(),
+                    memory_id,
+                    Validity.ACTIVE.value,
+                ),
             )
             if result.rowcount != 1:
-                raise KeyError(memory_id)
+                raise StaleMemoryState(
+                    f"memory {memory_id} is no longer active"
+                )
             conn.execute(
                 """
                 INSERT INTO memory_relations (
@@ -518,6 +568,170 @@ class MemoryRepository:
             if owned:
                 conn.close()
 
+    def save_pending_resolution(
+        self,
+        pending: PendingResolution,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
+        owned = connection is None
+        conn = connection or self._connect()
+        try:
+            existing_row = conn.execute(
+                """
+                SELECT status, user_id, agent_id, session_id
+                FROM pending_resolutions WHERE id = ?
+                """,
+                (pending.id,),
+            ).fetchone()
+            if existing_row is not None:
+                existing_scope = (
+                    existing_row["user_id"],
+                    existing_row["agent_id"],
+                    existing_row["session_id"],
+                )
+                if existing_scope != pending.scope.as_key():
+                    raise ValueError("pending resolution scope is immutable")
+                existing_status = PendingResolutionStatus(
+                    existing_row["status"]
+                )
+                if (
+                    existing_status is not PendingResolutionStatus.OPEN
+                    and pending.status is not existing_status
+                ):
+                    raise ValueError("terminal pending resolution cannot transition")
+            conn.execute(
+                """
+                INSERT INTO pending_resolutions (
+                    id, user_id, agent_id, session_id, status, importance,
+                    expires_at, updated_at, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status = excluded.status,
+                    importance = excluded.importance,
+                    expires_at = excluded.expires_at,
+                    updated_at = excluded.updated_at,
+                    payload_json = excluded.payload_json
+                """,
+                (
+                    pending.id,
+                    pending.scope.user_id,
+                    pending.scope.agent_id,
+                    pending.scope.session_id,
+                    pending.status.value,
+                    pending.importance,
+                    pending.expires_at.isoformat(),
+                    pending.updated_at.isoformat(),
+                    pending.model_dump_json(),
+                ),
+            )
+            if owned:
+                conn.commit()
+        finally:
+            if owned:
+                conn.close()
+
+    def get_pending_resolution(
+        self, resolution_id: str
+    ) -> PendingResolution | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM pending_resolutions WHERE id = ?",
+                (resolution_id,),
+            ).fetchone()
+        return (
+            PendingResolution.model_validate_json(row["payload_json"]) if row else None
+        )
+
+    def list_pending_resolutions(
+        self,
+        scope: MemoryScope | None = None,
+        status: PendingResolutionStatus | None = PendingResolutionStatus.OPEN,
+    ) -> list[PendingResolution]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if scope is not None:
+            clauses.extend(
+                ["user_id = ?", "agent_id IS ?", "session_id IS ?"]
+            )
+            params.extend([scope.user_id, scope.agent_id, scope.session_id])
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status.value)
+        query = "SELECT payload_json FROM pending_resolutions"
+        if clauses:
+            query += f" WHERE {' AND '.join(clauses)}"
+        query += " ORDER BY updated_at, id"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            PendingResolution.model_validate_json(row["payload_json"]) for row in rows
+        ]
+
+    def sweep_pending_resolutions(
+        self, *, now: datetime | None = None
+    ) -> int:
+        current = now or datetime.now(UTC)
+        changed = 0
+        with self.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM pending_resolutions
+                WHERE status = ?
+                ORDER BY expires_at, id
+                """,
+                (PendingResolutionStatus.OPEN.value,),
+            ).fetchall()
+            for row in rows:
+                pending = PendingResolution.model_validate_json(row["payload_json"])
+                status: PendingResolutionStatus | None = None
+                if pending.expires_at <= current:
+                    status = PendingResolutionStatus.EXPIRED
+                elif pending.conflicting_memory_ids:
+                    placeholders = ",".join(
+                        "?" for _ in pending.conflicting_memory_ids
+                    )
+                    active = connection.execute(
+                        f"""
+                        SELECT COUNT(*) FROM memories
+                        WHERE id IN ({placeholders}) AND validity = ?
+                        """,
+                        (
+                            *pending.conflicting_memory_ids,
+                            Validity.ACTIVE.value,
+                        ),
+                    ).fetchone()[0]
+                    if active == 0:
+                        status = PendingResolutionStatus.OBSOLETE
+                if status is None:
+                    continue
+                updated = pending.model_copy(
+                    update={
+                        "status": status,
+                        "updated_at": current,
+                        "last_evaluated_at": current,
+                    }
+                )
+                self.save_pending_resolution(updated, connection=connection)
+                changed += 1
+        return changed
+
+    def cleanup_pending_resolutions(self, *, before: datetime) -> int:
+        terminal = (
+            PendingResolutionStatus.RESOLVED.value,
+            PendingResolutionStatus.EXPIRED.value,
+            PendingResolutionStatus.OBSOLETE.value,
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM pending_resolutions
+                WHERE status IN (?, ?, ?) AND updated_at < ?
+                """,
+                (*terminal, before.isoformat()),
+            )
+        return cursor.rowcount
+
     @staticmethod
     def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
         return MemoryRecord(
@@ -535,5 +749,10 @@ class MemoryRepository:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             valid_from=datetime.fromisoformat(row["valid_from"]) if row["valid_from"] else None,
+            event_frame=(
+                EventFrame.model_validate_json(row["event_frame_json"])
+                if row["event_frame_json"]
+                else None
+            ),
             metadata=json.loads(row["metadata_json"]),
         )

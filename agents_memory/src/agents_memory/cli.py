@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,10 +10,16 @@ from rich.console import Console
 from agents_memory.config import Settings
 from agents_memory.embedding.openai import OpenAIEmbedder
 from agents_memory.extraction.llm import LLMFactExtractor
-from agents_memory.models import MemoryScope, MemoryType, Message
+from agents_memory.models import (
+    MemoryScope,
+    MemoryType,
+    Message,
+    PendingResolutionStatus,
+)
 from agents_memory.pipeline.write import MemoryWritePipeline
 from agents_memory.processing.candidate import CandidateProcessor
 from agents_memory.processing.decision import DecisionEngine
+from agents_memory.processing.pending import PendingResolutionPolicy
 from agents_memory.resolution.llm import LLMRelationResolver
 from agents_memory.retrieval.lookup import ContextLookup
 from agents_memory.service import MemoryService
@@ -58,6 +65,11 @@ def build_runtime() -> tuple[MemoryWritePipeline, MemoryService]:
         decision_engine=DecisionEngine(),
         coordinator=coordinator,
         repository=repository,
+        pending_policy=PendingResolutionPolicy(
+            high_days=settings.pending_high_ttl_days,
+            normal_days=settings.pending_normal_ttl_days,
+            low_days=settings.pending_low_ttl_days,
+        ),
     )
     return pipeline, MemoryService(repository, coordinator)
 
@@ -73,6 +85,7 @@ def create_app(
 ) -> typer.Typer:
     application = typer.Typer(help="Agent memory write pipeline")
     sync_app = typer.Typer(help="Repair or rebuild the semantic index")
+    pending_app = typer.Typer(help="Observe and maintain deferred resolutions")
     runtime: tuple[Any, Any] | None = None
     read_service_cache: Any | None = service
 
@@ -184,7 +197,51 @@ def create_app(
         _, memory_service = components()
         typer.echo(f"rebuilt {memory_service.rebuild_index()} memory vector(s)")
 
+    @pending_app.command("list")
+    def pending_list(
+        user_id: str = typer.Option(..., "--user-id"),
+        agent_id: str | None = typer.Option(None, "--agent-id"),
+        session_id: str | None = typer.Option(None, "--session-id"),
+        status: PendingResolutionStatus | None = typer.Option(
+            PendingResolutionStatus.OPEN, "--status"
+        ),
+        json_output: bool = typer.Option(False, "--json-output"),
+    ) -> None:
+        records = read_service().list_pending_resolutions(
+            MemoryScope(
+                user_id=user_id, agent_id=agent_id, session_id=session_id
+            ),
+            status,
+        )
+        payload = [record.model_dump(mode="json") for record in records]
+        if json_output:
+            typer.echo(json.dumps(payload, ensure_ascii=False))
+        else:
+            for record in records:
+                console.print(
+                    f"{record.resolution_id} [{record.status.value}] "
+                    f"age={record.age_seconds}s importance={record.importance} "
+                    f"expires={record.expires_at.isoformat()} {record.reason}"
+                )
+
+    @pending_app.command("sweep")
+    def pending_sweep() -> None:
+        typer.echo(
+            f"updated {read_service().sweep_pending_resolutions()} "
+            "pending resolution(s)"
+        )
+
+    @pending_app.command("cleanup")
+    def pending_cleanup(
+        before: datetime = typer.Option(..., "--before"),
+    ) -> None:
+        typer.echo(
+            f"deleted {read_service().cleanup_pending_resolutions(before=before)} "
+            "terminal pending resolution(s)"
+        )
+
     application.add_typer(sync_app, name="sync")
+    application.add_typer(pending_app, name="pending")
     return application
 
 
