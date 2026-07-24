@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     faithfulness_enabled: bool = False
     faithfulness_model: str = "GLM-4.7-Flash"
 
+    # 置信度聚合拒答（多信号加权，默认关）
+    confidence_enabled: bool = False
+    confidence_threshold: float = 0.5
+    confidence_weight_rerank: float = 0.3
+    confidence_weight_citation: float = 0.3
+    confidence_weight_faithfulness: float = 0.4
+
     # 分块
     chunk_size: int = 400
     chunk_overlap: int = 64
