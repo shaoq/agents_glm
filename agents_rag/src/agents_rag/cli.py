@@ -171,6 +171,11 @@ def ask(
             ),
             citation_checker=CitationChecker(),
             faithfulness_checker=faithfulness_checker,
+            confidence_enabled=settings.confidence_enabled,
+            confidence_threshold=settings.confidence_threshold,
+            confidence_weight_rerank=settings.confidence_weight_rerank,
+            confidence_weight_citation=settings.confidence_weight_citation,
+            confidence_weight_faithfulness=settings.confidence_weight_faithfulness,
             vector_top_k=settings.vector_top_k,
             bm25_top_k=settings.bm25_top_k,
             rerank_top_n=settings.rerank_top_n,
@@ -184,6 +189,8 @@ def _print_answer(answer: Answer) -> None:
     if answer.status.value == "no_result":
         console.print(f"[yellow]未找到[/] · {answer.message}")
         return
+    if answer.status.value == "low_confidence":
+        console.print(f"[yellow]⚠ 低置信度 · 仅供参考[/]")
     console.print(f"[bold green]回答[/]\n{answer.text}\n")
     if answer.faithfulness_score is not None:
         console.print(f"[dim]faithfulness: {answer.faithfulness_score:.2f}[/]")

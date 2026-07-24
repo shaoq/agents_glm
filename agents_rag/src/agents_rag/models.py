@@ -294,6 +294,7 @@ class Citation(BaseModel):
 
 class AnswerStatus(str, Enum):
     ANSWERED = "answered"
+    LOW_CONFIDENCE = "low_confidence"
     NO_RESULT = "no_result"
 
 
@@ -308,3 +309,4 @@ class Answer(BaseModel):
     status: AnswerStatus = AnswerStatus.ANSWERED
     message: str = ""
     faithfulness_score: float | None = None  # faithfulness 校验分数（None=未校验/失败）
+    confidence: float | None = None  # 置信度聚合分（None=未启用聚合）

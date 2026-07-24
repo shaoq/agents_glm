@@ -29,6 +29,11 @@ class QueryPipeline:
         generator: Generator,
         citation_checker: CitationChecker,
         faithfulness_checker: FaithfulnessChecker | None = None,
+        confidence_enabled: bool = False,
+        confidence_threshold: float = 0.5,
+        confidence_weight_rerank: float = 0.3,
+        confidence_weight_citation: float = 0.3,
+        confidence_weight_faithfulness: float = 0.4,
         vector_top_k: int = 20,
         bm25_top_k: int = 20,
         rerank_top_n: int = 6,
@@ -39,6 +44,11 @@ class QueryPipeline:
         self._generator = generator
         self._citation_checker = citation_checker
         self._faithfulness_checker = faithfulness_checker
+        self._confidence_enabled = confidence_enabled
+        self._confidence_threshold = confidence_threshold
+        self._w_rerank = confidence_weight_rerank
+        self._w_citation = confidence_weight_citation
+        self._w_faith = confidence_weight_faithfulness
         self._vector_top_k = vector_top_k
         self._bm25_top_k = bm25_top_k
         self._rerank_top_n = rerank_top_n
@@ -85,4 +95,35 @@ class QueryPipeline:
             score = self._faithfulness_checker.check(answer.text, context_str)
             answer = answer.model_copy(update={"faithfulness_score": score})
 
+        # ⑩ 置信度聚合（可选，只标注不丢弃）
+        if self._confidence_enabled:
+            answer = self._aggregate_confidence(answer, id_map)
+
         return answer
+
+    def _aggregate_confidence(self, answer: Answer, id_map: dict) -> Answer:
+        """三信号加权聚合 → confidence → answered/low_confidence。"""
+        # A. rerank min-max 归一化
+        scores = [r.score for r in id_map.values()]
+        if scores:
+            mn, mx = min(scores), max(scores)
+            rerank_norm = sum(
+                (s - mn) / (mx - mn) if mx > mn else 1.0 for s in scores
+            ) / len(scores)
+        else:
+            rerank_norm = 0.0
+        # B. citation 通过率
+        citation_rate = len(answer.used_context_ids) / len(id_map) if id_map else 0.0
+        # C. faithfulness（可能 None）
+        faith = answer.faithfulness_score
+
+        wr, wc, wf = self._w_rerank, self._w_citation, self._w_faith
+        if faith is not None:
+            confidence = (wr * rerank_norm + wc * citation_rate + wf * faith) / (wr + wc + wf)
+        elif (wr + wc) > 0:
+            confidence = (wr * rerank_norm + wc * citation_rate) / (wr + wc)
+        else:
+            confidence = 0.0
+
+        status = AnswerStatus.ANSWERED if confidence >= self._confidence_threshold else AnswerStatus.LOW_CONFIDENCE
+        return answer.model_copy(update={"confidence": confidence, "status": status})
