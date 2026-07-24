@@ -43,9 +43,9 @@ TBD - created by archiving change add-query-pipeline. Update Purpose after archi
 - **THEN** 生成「GLM-4.5 支持 256-2048 维[1]…」式带引用标注的回答
 
 ### Requirement: 引用校验（CitationChecker）
-系统 SHALL 对生成的回答后处理校验：正则提取 `[N]` → 与上下文编号集合比对 → 无效引用（不存在的编号）剔除/标记；SHALL 从检索结果 metadata 构造 `Citation`（doc_id / source_name / page / snippet）。
+系统 SHALL 对生成的回答后处理校验：正则提取 `[N]` → 与上下文编号集合比对 → 无效引用剔除/标记；SHALL 从检索结果构造 `Citation`。faithfulness_enabled 时 SHALL 执行 faithfulness 二次校验。
 
-**当 `faithfulness_enabled=True` 时**，系统 SHALL 在 CitationChecker 之后执行 faithfulness 二次校验：LLM judge 逐句判断回答每句是否被上下文支撑，返回 `faithfulness_score`（忠实句 / 总句），写入 `Answer.faithfulness_score`。faithfulness 校验 SHALL 只打分不拦截（低分回答仍返回，带 score 供展示/后续置信度拒答用）。JSON 解析失败时 SHALL 返回 `faithfulness_score=None`（不阻塞）。
+**当 `confidence_enabled=True` 时**，系统 SHALL 在 faithfulness 校验后聚合三信号计算 `confidence` 分数：rerank 分数均值（归一化）+ citation 通过率（`len(used_context_ids) / len(id_map)`）+ faithfulness 分数（如可用）。confidence < 阈值时 SHALL 标记 `AnswerStatus.LOW_CONFIDENCE`（展示回答 + ⚠标注「仅供参考」）。`Answer.confidence` SHALL 携带聚合分数。
 
 #### Scenario: 无效引用剔除
 - **WHEN** 生成回答含 `[9]` 但上下文只有 [1]-[6]
@@ -61,11 +61,19 @@ TBD - created by archiving change add-query-pipeline. Update Purpose after archi
 
 #### Scenario: faithfulness 关闭时 score 为 None
 - **WHEN** `faithfulness_enabled=False`
-- **THEN** `Answer.faithfulness_score = None`（未校验）
+- **THEN** `Answer.faithfulness_score = None`
 
-#### Scenario: JSON 解析失败不阻塞
-- **WHEN** LLM judge 输出非合法 JSON
-- **THEN** `faithfulness_score = None`，回答正常返回
+#### Scenario: confidence 高 → ANSWERED
+- **WHEN** `confidence_enabled=True` 且三信号聚合 confidence=0.85 ≥ 阈值 0.5
+- **THEN** `Answer.status = ANSWERED`，`Answer.confidence = 0.85`
+
+#### Scenario: confidence 低 → LOW_CONFIDENCE（展示+标注）
+- **WHEN** `confidence_enabled=True` 且三信号聚合 confidence=0.3 < 阈值 0.5
+- **THEN** `Answer.status = LOW_CONFIDENCE`，回答文本仍展示 + ⚠标注
+
+#### Scenario: confidence 关闭 → 不聚合
+- **WHEN** `confidence_enabled=False`
+- **THEN** `Answer.confidence = None`，status 由 citation/faithfulness 决定（行为不变）
 
 ### Requirement: 检索空兜底
 系统 SHALL 在 RRF 融合后无结果时直接返回 `status=NO_RESULT`（不调用 Rerank/Generator），附 message 引导用户。
