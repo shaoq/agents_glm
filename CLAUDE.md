@@ -18,6 +18,7 @@
 
 - **探索 / 分析类请求 → 启动 OpenSpec explore**：当用户输入「explore」「分析」「探讨」「梳理」「研究」等探索 / 需求分析类关键词时，**启动 OpenSpec 的 explore skill**（`openspec-explore` / `opsx:explore`）进行分析，**不要**进入 Claude Code 自带的 plan mode。
 - **后续统一走 OpenSpec 工作流**：explore → propose（`openspec-propose` / `opsx:propose`）→ apply（`openspec-apply-change` / `opsx:apply`）。规划与实施都用 OpenSpec，不用 plan mode。
+- **⚠️ explore 后必须等用户确认再创建提案**：explore / 分析完成后，**先呈现方案让用户确认或调整**，**不要直接跳到创建 openspec 提案**（`openspec new change` + proposal/design/specs/tasks）。只有当用户明确说「创建提案」「propose」或确认方案后，才执行提案创建。
 - **例外**：纯粹的 bug 调试走 `systematic-debugging`、代码理解走 GitNexus，不强制走 OpenSpec——本规则针对「需求探索 / 方案规划」类任务。
 - 原因：本项目以 OpenSpec 做 spec-driven 管理（`openspec/` 已建 specs / changes），工作流需与之对齐。
 
