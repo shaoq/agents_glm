@@ -50,7 +50,9 @@ secrets/
 
 # Data / models（大文件，按项目需要在子目录内调整）
 data/
-storage/
+/storage/
+/agents_rag/storage/
+/agents_memory/storage/
 *.db
 *.sqlite3
 

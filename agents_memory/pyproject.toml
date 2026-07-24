@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agents-memory"
+version = "0.1.0"
+description = "Independent agent memory write pipeline"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1",
+    "chromadb>=0.5",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "typer>=0.12",
+    "rich>=13",
+    "tenacity>=8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+agents-memory = "agents_memory.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agents_memory"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
