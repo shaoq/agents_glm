@@ -61,3 +61,4 @@ logs/
 # AI 工具工作目录（工具自动生成，不入业务仓库）
 .claude/
 .codex/
+.worktrees/
