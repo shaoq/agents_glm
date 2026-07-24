@@ -5,7 +5,7 @@ from agents_memory.models import (
     Action,
     ActionPlan,
     CandidateMemory,
-    EventFrame,
+    MemoryRecord,
     MemoryScope,
     MemoryType,
     Message,
@@ -16,6 +16,7 @@ from agents_memory.models import (
     Validity,
 )
 from agents_memory.processing.decision import DecisionEngine
+from agents_memory.processing.event_matching import frames_related
 from agents_memory.processing.pending import missing_event_dimensions
 from agents_memory.resolution.base import RelationResolver
 from agents_memory.storage.repository import MemoryRepository
@@ -27,7 +28,18 @@ class ReconciliationResult:
     consumed_candidate_indexes: frozenset[int] = frozenset()
 
 
+@dataclass(frozen=True)
+class _EvidenceSelection:
+    """Evidence chosen for one pending item and its plan index."""
+
+    candidate_index: int
+    candidate: CandidateMemory | None
+    messages: tuple[Message, ...]
+
+
 class PendingResolutionReconciler:
+    """Reconsider open assertions only when a write brings unused evidence."""
+
     def __init__(
         self,
         repository: MemoryRepository,
@@ -47,6 +59,8 @@ class PendingResolutionReconciler:
         candidates: list[CandidateMemory],
         resolver: RelationResolver,
     ) -> ReconciliationResult:
+        """Produce plans; persistence remains the coordinator's responsibility."""
+
         event_candidates = [
             (index, candidate)
             for index, candidate in enumerate(candidates)
@@ -59,164 +73,231 @@ class PendingResolutionReconciler:
         for pending in self.repository.list_pending_resolutions(scope)[
             : self.max_pending
         ]:
-            self._validate_message_ids(pending.source_messages, tuple(messages))
-            new_messages = [
-                message
-                for message in messages
-                if message.message_id
-                not in pending.processed_evidence_message_ids
-            ]
+            new_messages = self._new_messages(pending, messages)
             if not new_messages:
                 continue
             synthetic_index = len(candidates) + len(plans)
-            if pending.expires_at <= now:
-                updated = pending.model_copy(
-                    update={
-                        "status": PendingResolutionStatus.EXPIRED,
-                        "updated_at": now,
-                        "last_evaluated_at": now,
-                    }
-                )
-                plans.append(
-                    ActionPlan(
-                        candidate_index=synthetic_index,
-                        candidate=pending.candidate,
-                        action=Action.NOOP,
-                        pending_resolution=updated,
-                        reason="pending resolution expired",
-                    )
-                )
+            lifecycle = self._lifecycle_plan(
+                pending,
+                synthetic_index,
+                claimed_targets,
+                now,
+            )
+            if lifecycle is not None:
+                plans.append(lifecycle)
                 continue
-            if claimed_targets & set(pending.conflicting_memory_ids):
-                updated = pending.model_copy(
-                    update={
-                        "status": PendingResolutionStatus.OBSOLETE,
-                        "updated_at": now,
-                        "last_evaluated_at": now,
-                        "reason": "target superseded by another resolution",
-                    }
-                )
-                plans.append(
-                    ActionPlan(
-                        candidate_index=synthetic_index,
-                        candidate=pending.candidate,
-                        action=Action.NOOP,
-                        pending_resolution=updated,
-                        reason=updated.reason,
-                    )
-                )
-                continue
-            evidence = next(
-                (
-                    (index, candidate)
-                    for index, candidate in event_candidates
-                    if index not in consumed
-                    and self._frames_related(
-                        pending.candidate.event_frame, candidate.event_frame
-                    )
-                ),
-                None,
+
+            evidence = self._select_evidence(
+                pending,
+                new_messages,
+                event_candidates,
+                consumed,
+                synthetic_index,
             )
             if evidence is None:
-                index = synthetic_index
-                relevant_messages = [
-                    message
-                    for message in new_messages
-                    if self._eligible_role(
-                        pending.candidate.source_kind, message
-                    )
-                    and self._message_related(pending, message)
-                ]
-                if not relevant_messages:
-                    continue
-                evidence_candidate = None
-            else:
-                index, evidence_candidate = evidence
-                consumed.add(index)
-                evidence_ids = set(evidence_candidate.source_message_ids)
-                relevant_messages = [
-                    message
-                    for message in new_messages
-                    if message.message_id in evidence_ids
-                    and self._eligible_role(
-                        evidence_candidate.source_kind, message
-                    )
-                ]
-                if not relevant_messages:
-                    consumed.remove(index)
-                    continue
-
+                continue
             candidate, resolver_candidate = self._compose_assertion(
-                pending, evidence_candidate, relevant_messages
+                pending,
+                evidence.candidate,
+                list(evidence.messages),
+            )
+            plans.append(
+                self._resolved_plan(
+                    pending=pending,
+                    evidence=evidence,
+                    candidate=candidate,
+                    resolver_candidate=resolver_candidate,
+                    active_targets=self._active_targets(pending),
+                    resolver=resolver,
+                    claimed_targets=claimed_targets,
+                    now=now,
+                )
+            )
+        return ReconciliationResult(tuple(plans), frozenset(consumed))
+
+    def _new_messages(
+        self,
+        pending: PendingResolution,
+        messages: list[Message],
+    ) -> list[Message]:
+        """Reject message-ID reuse and retain only evidence not seen before."""
+
+        self._validate_message_ids(pending.source_messages, tuple(messages))
+        return [
+            message
+            for message in messages
+            if message.message_id not in pending.processed_evidence_message_ids
+        ]
+
+    @staticmethod
+    def _lifecycle_plan(
+        pending: PendingResolution,
+        candidate_index: int,
+        claimed_targets: set[str],
+        now: datetime,
+    ) -> ActionPlan | None:
+        """Close pending work that cannot safely enter semantic resolution."""
+
+        if pending.expires_at <= now:
+            status = PendingResolutionStatus.EXPIRED
+            reason = "pending resolution expired"
+        elif claimed_targets & set(pending.conflicting_memory_ids):
+            status = PendingResolutionStatus.OBSOLETE
+            reason = "target superseded by another resolution"
+        else:
+            return None
+        updated = pending.model_copy(
+            update={
+                "status": status,
+                "updated_at": now,
+                "last_evaluated_at": now,
+                "reason": reason if status is PendingResolutionStatus.OBSOLETE else pending.reason,
+            }
+        )
+        return ActionPlan(
+            candidate_index=candidate_index,
+            candidate=pending.candidate,
+            action=Action.NOOP,
+            pending_resolution=updated,
+            reason=reason,
+        )
+
+    def _select_evidence(
+        self,
+        pending: PendingResolution,
+        new_messages: list[Message],
+        event_candidates: list[tuple[int, CandidateMemory]],
+        consumed: set[int],
+        synthetic_index: int,
+    ) -> _EvidenceSelection | None:
+        """Prefer a structured event candidate, then fall back to raw messages."""
+
+        evidence = next(
+            (
+                (index, candidate)
+                for index, candidate in event_candidates
+                if index not in consumed
+                and frames_related(
+                    pending.candidate.event_frame,
+                    candidate.event_frame,
+                )
+            ),
+            None,
+        )
+        if evidence is None:
+            relevant = tuple(
+                message
+                for message in new_messages
+                if self._eligible_role(pending.candidate.source_kind, message)
+                and self._message_related(pending, message)
+            )
+            return (
+                _EvidenceSelection(synthetic_index, None, relevant)
+                if relevant
+                else None
             )
 
-            targets = self.repository.get_memories(
+        index, candidate = evidence
+        consumed.add(index)
+        evidence_ids = set(candidate.source_message_ids)
+        relevant = tuple(
+            message
+            for message in new_messages
+            if message.message_id in evidence_ids
+            and self._eligible_role(candidate.source_kind, message)
+        )
+        if relevant:
+            return _EvidenceSelection(index, candidate, relevant)
+        consumed.remove(index)
+        return None
+
+    def _active_targets(
+        self,
+        pending: PendingResolution,
+    ) -> list[MemoryRecord]:
+        """Reload truth because targets may have changed while evidence waited."""
+
+        return [
+            target
+            for target in self.repository.get_memories(
                 list(pending.conflicting_memory_ids)
             )
-            active_targets = [
-                target for target in targets if target.validity is Validity.ACTIVE
-            ]
-            merged_messages = self._merge_messages(
-                pending.source_messages, tuple(relevant_messages)
-            )
-            used_ids = tuple(
-                message.message_id for message in relevant_messages
-            )
-            processed = tuple(
-                dict.fromkeys(
-                    (*pending.processed_evidence_message_ids, *used_ids)
-                )
-            )
-            if not active_targets:
-                updated = pending.model_copy(
-                    update={
-                        "status": PendingResolutionStatus.OBSOLETE,
-                        "updated_at": now,
-                        "last_evaluated_at": now,
-                        "processed_evidence_message_ids": processed,
-                        "source_messages": merged_messages,
-                    }
-                )
-                plans.append(
-                    ActionPlan(
-                        candidate_index=index,
-                        candidate=candidate,
-                        action=Action.NOOP,
-                        pending_resolution=updated,
-                        reason="deferred target is no longer active",
-                    )
-                )
-                continue
+            if target.validity is Validity.ACTIVE
+        ]
 
-            relations = resolver.resolve(resolver_candidate, active_targets)
-            plan = self.decision_engine.decide(
-                index, candidate, active_targets, relations
+    def _resolved_plan(
+        self,
+        *,
+        pending: PendingResolution,
+        evidence: _EvidenceSelection,
+        candidate: CandidateMemory,
+        resolver_candidate: CandidateMemory,
+        active_targets: list[MemoryRecord],
+        resolver: RelationResolver,
+        claimed_targets: set[str],
+        now: datetime,
+    ) -> ActionPlan:
+        """Re-decide against current truth and attach the pending transition."""
+
+        merged_messages = self._merge_messages(
+            pending.source_messages,
+            evidence.messages,
+        )
+        processed = tuple(
+            dict.fromkeys(
+                (
+                    *pending.processed_evidence_message_ids,
+                    *(message.message_id for message in evidence.messages),
+                )
             )
-            if plan.action is Action.UPDATE:
-                claimed_targets.update(plan.target_ids)
-            status = (
-                PendingResolutionStatus.OPEN
-                if plan.action is Action.DEFER
-                else PendingResolutionStatus.RESOLVED
-            )
+        )
+        if not active_targets:
             updated = pending.model_copy(
                 update={
-                    "candidate": candidate,
-                    "grouped_candidates": (candidate,),
-                    "status": status,
+                    "status": PendingResolutionStatus.OBSOLETE,
                     "updated_at": now,
                     "last_evaluated_at": now,
                     "processed_evidence_message_ids": processed,
-                    "source_message_ids": candidate.source_message_ids,
                     "source_messages": merged_messages,
-                    "missing_dimensions": missing_event_dimensions(candidate),
-                    "reason": plan.reason,
                 }
             )
-            plans.append(
-                plan.model_copy(update={"pending_resolution": updated})
+            return ActionPlan(
+                candidate_index=evidence.candidate_index,
+                candidate=candidate,
+                action=Action.NOOP,
+                pending_resolution=updated,
+                reason="deferred target is no longer active",
             )
-        return ReconciliationResult(tuple(plans), frozenset(consumed))
+
+        relations = resolver.resolve(resolver_candidate, active_targets)
+        plan = self.decision_engine.decide(
+            evidence.candidate_index,
+            candidate,
+            active_targets,
+            relations,
+        )
+        if plan.action is Action.UPDATE:
+            claimed_targets.update(plan.target_ids)
+        status = (
+            PendingResolutionStatus.OPEN
+            if plan.action is Action.DEFER
+            else PendingResolutionStatus.RESOLVED
+        )
+        updated = pending.model_copy(
+            update={
+                "candidate": candidate,
+                "grouped_candidates": (candidate,),
+                "status": status,
+                "updated_at": now,
+                "last_evaluated_at": now,
+                "processed_evidence_message_ids": processed,
+                "source_message_ids": candidate.source_message_ids,
+                "source_messages": merged_messages,
+                "missing_dimensions": missing_event_dimensions(candidate),
+                "reason": plan.reason,
+            }
+        )
+        return plan.model_copy(update={"pending_resolution": updated})
 
     @classmethod
     def _compose_assertion(
@@ -225,6 +306,8 @@ class PendingResolutionReconciler:
         evidence: CandidateMemory | None,
         messages: list[Message],
     ) -> tuple[CandidateMemory, CandidateMemory]:
+        """Build the stored assertion and a resolver-only evidence-enriched view."""
+
         grouped = pending.grouped_candidates or (pending.candidate,)
         contents = tuple(dict.fromkeys(item.content for item in grouped))
         frame = pending.candidate.event_frame
@@ -348,34 +431,6 @@ class PendingResolutionReconciler:
                     frame.location,
                 )
             )
-        )
-
-    @staticmethod
-    def _frames_related(
-        left: EventFrame | None, right: EventFrame | None
-    ) -> bool:
-        if left is None or right is None:
-            return False
-        comparable = [
-            (getattr(left, field), getattr(right, field))
-            for field in ("predicate", "object", "location")
-            if getattr(left, field) != "unknown"
-            and getattr(right, field) != "unknown"
-        ]
-        return bool(comparable) and all(a == b for a, b in comparable)
-
-    @classmethod
-    def _group_frames_related(
-        cls,
-        grouped: tuple[CandidateMemory, ...],
-        candidate: CandidateMemory,
-    ) -> bool:
-        return bool(grouped) and all(
-            cls._frames_related(
-                item.event_frame,
-                candidate.event_frame,
-            )
-            for item in grouped
         )
 
     @staticmethod

@@ -44,6 +44,13 @@ class StoredRequest(BaseModel):
 
 
 class MemoryRepository:
+    """SQLite truth store for memory, provenance, lifecycle, and repair logs.
+
+    Methods accept an optional connection so StorageCoordinator can compose
+    several operations into one transaction. When omitted, a method owns its
+    short connection and commit.
+    """
+
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +164,8 @@ class MemoryRepository:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Own one all-or-nothing boundary for a complete write plan."""
+
         connection = self._connect()
         try:
             connection.execute("BEGIN")
@@ -167,6 +176,8 @@ class MemoryRepository:
             raise
         finally:
             connection.close()
+
+    # Memory truth and provenance
 
     def save_memory(
         self,
@@ -321,6 +332,13 @@ class MemoryRepository:
         *,
         connection: sqlite3.Connection | None = None,
     ) -> None:
+        """Move exactly one active version to history and link its successor.
+
+        The active predicate is a last-moment stale-state guard: plans are
+        computed before the transaction, so another completed write must not
+        be overwritten silently.
+        """
+
         owned = connection is None
         conn = connection or self._connect()
         try:
@@ -378,6 +396,8 @@ class MemoryRepository:
             )
             for row in rows
         ]
+
+    # Request idempotency
 
     def save_request(
         self,
@@ -476,6 +496,8 @@ class MemoryRepository:
             else None,
         )
 
+    # Derivative-index outbox
+
     def enqueue_index_operation(
         self,
         request_id: str,
@@ -567,6 +589,8 @@ class MemoryRepository:
         finally:
             if owned:
                 conn.close()
+
+    # Deferred event assertions
 
     def save_pending_resolution(
         self,
@@ -671,6 +695,13 @@ class MemoryRepository:
     def sweep_pending_resolutions(
         self, *, now: datetime | None = None
     ) -> int:
+        """Expire or obsolete pending rows without making semantic guesses.
+
+        Maintenance never calls a relation model. It only applies lifecycle
+        facts available in SQLite: TTL expiry or absence of every active
+        conflicting target.
+        """
+
         current = now or datetime.now(UTC)
         changed = 0
         with self.transaction() as connection:
@@ -717,6 +748,8 @@ class MemoryRepository:
         return changed
 
     def cleanup_pending_resolutions(self, *, before: datetime) -> int:
+        """Delete only terminal pending rows older than the retention cutoff."""
+
         terminal = (
             PendingResolutionStatus.RESOLVED.value,
             PendingResolutionStatus.EXPIRED.value,

@@ -1,6 +1,5 @@
 import hashlib
 import json
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from openai import (
@@ -14,23 +13,22 @@ from agents_memory.extraction.base import FactExtractor
 from agents_memory.extraction.llm import ExtractionOutputError, SourceAttributionError
 from agents_memory.models import (
     Action,
+    CandidateMemory,
     ErrorCode,
-    MemoryRecord,
     MemoryScope,
     Message,
-    PendingResolution,
-    PendingResolutionStatus,
-    Validity,
     WriteReport,
     WriteStatus,
 )
-from agents_memory.processing.candidate import CandidateProcessor
+from agents_memory.pipeline.state import WriteBatchState
+from agents_memory.processing.candidate import CandidateBatch, CandidateProcessor
 from agents_memory.processing.decision import AmbiguousDecision, DecisionEngine
-from agents_memory.processing.pending import (
-    PendingResolutionPolicy,
-    missing_event_dimensions,
+from agents_memory.processing.deferred import DeferredResolutionCollector
+from agents_memory.processing.pending import PendingResolutionPolicy
+from agents_memory.processing.reconciliation import (
+    PendingResolutionReconciler,
+    ReconciliationResult,
 )
-from agents_memory.processing.reconciliation import PendingResolutionReconciler
 from agents_memory.resolution.base import RelationResolver
 from agents_memory.resolution.llm import RelationOutputError
 from agents_memory.retrieval.lookup import ContextLookup, IndexLookupError
@@ -42,7 +40,21 @@ from agents_memory.storage.repository import (
 )
 
 
+class _WriteAborted(Exception):
+    """Carry a fully classified report across internal pipeline stages."""
+
+    def __init__(self, report: WriteReport) -> None:
+        self.report = report
+
+
 class MemoryWritePipeline:
+    """Coordinate write stages without owning their domain algorithms.
+
+    Planning happens against an in-memory overlay. Only after every candidate
+    has a deterministic plan does StorageCoordinator open the SQLite
+    transaction and synchronize the derivative vector index.
+    """
+
     def __init__(
         self,
         *,
@@ -64,6 +76,7 @@ class MemoryWritePipeline:
         self.coordinator = coordinator
         self.repository = repository
         self.pending_policy = pending_policy or PendingResolutionPolicy()
+        self.deferred_collector = DeferredResolutionCollector(self.pending_policy)
         self.reconciler = reconciler or PendingResolutionReconciler(
             repository, decision_engine
         )
@@ -75,99 +88,178 @@ class MemoryWritePipeline:
         scope: MemoryScope,
         messages: list[Message],
     ) -> WriteReport:
+        """Run the request through ordered, fail-fast write stages."""
+
         input_hash = self._input_hash(scope, messages)
+        try:
+            existing = self._existing_request(request_id, input_hash)
+            if existing is not None:
+                return existing
+
+            extracted, batch = self._extract_batch(
+                request_id=request_id,
+                messages=messages,
+            )
+            reconciliation = self._reconcile_pending(
+                request_id=request_id,
+                scope=scope,
+                messages=messages,
+                batch=batch,
+                extracted_count=len(extracted),
+            )
+            state = WriteBatchState()
+            self._apply_reconciliation_plans(
+                request_id=request_id,
+                scope=scope,
+                reconciliation=reconciliation,
+                state=state,
+                extracted_count=len(extracted),
+                filtered_count=batch.filtered_count,
+            )
+            self._plan_candidates(
+                request_id=request_id,
+                scope=scope,
+                messages=messages,
+                batch=batch,
+                reconciliation=reconciliation,
+                state=state,
+                extracted_count=len(extracted),
+            )
+            return self._commit(
+                request_id=request_id,
+                input_hash=input_hash,
+                scope=scope,
+                messages=messages,
+                state=state,
+                extracted_count=len(extracted),
+                filtered_count=batch.filtered_count,
+            )
+        except _WriteAborted as aborted:
+            return aborted.report
+
+    def _existing_request(
+        self,
+        request_id: str,
+        input_hash: str,
+    ) -> WriteReport | None:
+        """Return a saved result or resume the index half of a committed write."""
+
         try:
             stored = self.repository.get_request(request_id, input_hash)
         except IdempotencyConflict as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                error_code=ErrorCode.IDEMPOTENCY_CONFLICT,
-                error_message=str(exc),
-            )
-        if stored is not None and stored.report is not None:
-            if stored.status == "complete":
-                return stored.report
-            if stored.status == "committed":
-                return self.coordinator.repair_request(request_id, input_hash)
+            raise _WriteAborted(
+                self._failure(
+                    request_id,
+                    ErrorCode.IDEMPOTENCY_CONFLICT,
+                    exc,
+                )
+            ) from exc
+        if stored is None or stored.report is None:
+            return None
+        if stored.status == "complete":
+            return stored.report
+        if stored.status == "committed":
+            return self.coordinator.repair_request(request_id, input_hash)
+        return None
+
+    def _extract_batch(
+        self,
+        *,
+        request_id: str,
+        messages: list[Message],
+    ) -> tuple[list[CandidateMemory], CandidateBatch]:
+        """Extract and normalize candidates before any relation or storage work."""
 
         try:
             extracted = self.extractor.extract(messages)
-            batch = self.processor.process(extracted, messages)
+            return extracted, self.processor.process(extracted, messages)
         except (
             APIConnectionError,
             APITimeoutError,
             RateLimitError,
             InternalServerError,
         ) as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.RETRYABLE,
-                retryable=True,
-                error_code=ErrorCode.EXTRACTION_FAILED,
-                error_message=str(exc),
-            )
+            raise _WriteAborted(
+                self._failure(
+                    request_id,
+                    ErrorCode.EXTRACTION_FAILED,
+                    exc,
+                    retryable=True,
+                )
+            ) from exc
         except (ExtractionOutputError, SourceAttributionError, ValueError) as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                error_code=ErrorCode.EXTRACTION_FAILED,
-                error_message=str(exc),
-            )
-        plans = []
-        embeddings: dict[int, list[float]] = {}
-        pending: list[MemoryRecord] = []
-        inactive_ids: set[str] = set()
-        deferred_groups: list[PendingResolution] = []
+            raise _WriteAborted(
+                self._failure(request_id, ErrorCode.EXTRACTION_FAILED, exc)
+            ) from exc
+
+    def _reconcile_pending(
+        self,
+        *,
+        request_id: str,
+        scope: MemoryScope,
+        messages: list[Message],
+        batch: CandidateBatch,
+        extracted_count: int,
+    ) -> ReconciliationResult:
+        """Use only new natural evidence to reconsider open pending assertions."""
+
         try:
-            reconciliation = self.reconciler.reconcile(
+            return self.reconciler.reconcile(
                 scope=scope,
                 messages=messages,
-                candidates=batch.candidates,
+                candidates=list(batch.candidates),
                 resolver=self.resolver,
             )
         except RelationOutputError as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
-                error_code=ErrorCode.RELATION_FAILED,
-                error_message=str(exc),
-            )
+            raise self._relation_abort(
+                request_id, exc, extracted_count, batch.filtered_count
+            ) from exc
         except (
             APIConnectionError,
             APITimeoutError,
             RateLimitError,
             InternalServerError,
         ) as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.RETRYABLE,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
+            raise self._relation_abort(
+                request_id,
+                exc,
+                extracted_count,
+                batch.filtered_count,
                 retryable=True,
-                error_code=ErrorCode.RELATION_FAILED,
-                error_message=str(exc),
-            )
+            ) from exc
         except AmbiguousDecision as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
-                error_code=ErrorCode.AMBIGUOUS_RELATION,
-                error_message=str(exc),
-            )
+            raise _WriteAborted(
+                self._failure(
+                    request_id,
+                    ErrorCode.AMBIGUOUS_RELATION,
+                    exc,
+                    extracted_count=extracted_count,
+                    filtered_count=batch.filtered_count,
+                )
+            ) from exc
         except ValueError as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
-                error_code=ErrorCode.INVALID_INPUT,
-                error_message=str(exc),
-            )
+            raise _WriteAborted(
+                self._failure(
+                    request_id,
+                    ErrorCode.INVALID_INPUT,
+                    exc,
+                    extracted_count=extracted_count,
+                    filtered_count=batch.filtered_count,
+                )
+            ) from exc
+
+    def _apply_reconciliation_plans(
+        self,
+        *,
+        request_id: str,
+        scope: MemoryScope,
+        reconciliation: ReconciliationResult,
+        state: WriteBatchState,
+        extracted_count: int,
+        filtered_count: int,
+    ) -> None:
+        """Overlay plans that resolve older pending assertions before new work."""
+
         for resolution_plan in reconciliation.plans:
             plan = resolution_plan
             if plan.action in (Action.ADD, Action.UPDATE):
@@ -176,37 +268,37 @@ class MemoryWritePipeline:
                         plan.candidate.content, scope, plan.candidate.type
                     )
                 except IndexLookupError as exc:
-                    return WriteReport(
-                        request_id=request_id,
-                        status=WriteStatus.RETRYABLE,
-                        extracted_count=len(extracted),
-                        filtered_count=batch.filtered_count,
-                        retryable=True,
-                        error_code=ErrorCode.INDEX_UNAVAILABLE,
-                        error_message=str(exc),
-                    )
-                embeddings[plan.candidate_index] = resolution_lookup.embedding
-                if plan.action is Action.UPDATE:
-                    inactive_ids.update(plan.target_ids)
-                    pending = [
-                        item for item in pending if item.id not in plan.target_ids
-                    ]
-                memory_id = str(uuid4())
-                plan = plan.model_copy(update={"new_memory_id": memory_id})
-                pending.append(
-                    MemoryRecord(
-                        id=memory_id,
-                        scope=scope,
-                        type=plan.candidate.type,
-                        content=plan.candidate.content,
-                        importance=plan.candidate.importance,
-                        confidence=plan.candidate.confidence,
-                        validity=Validity.ACTIVE,
-                        event_frame=plan.candidate.event_frame,
-                        metadata=plan.candidate.metadata,
-                    )
+                    raise _WriteAborted(
+                        self._failure(
+                            request_id,
+                            ErrorCode.INDEX_UNAVAILABLE,
+                            exc,
+                            retryable=True,
+                            extracted_count=extracted_count,
+                            filtered_count=filtered_count,
+                        )
+                    ) from exc
+                plan = state.stage_materialized(
+                    plan,
+                    scope=scope,
+                    memory_id=str(uuid4()),
                 )
-            plans.append(plan)
+                state.record(plan, embedding=resolution_lookup.embedding)
+                continue
+            state.record(plan)
+
+    def _plan_candidates(
+        self,
+        *,
+        request_id: str,
+        scope: MemoryScope,
+        messages: list[Message],
+        batch: CandidateBatch,
+        reconciliation: ReconciliationResult,
+        state: WriteBatchState,
+        extracted_count: int,
+    ) -> None:
+        """Plan unconsumed candidates against storage plus the batch overlay."""
 
         for index, candidate in enumerate(batch.candidates):
             if index in reconciliation.consumed_candidate_indexes:
@@ -214,22 +306,20 @@ class MemoryWritePipeline:
             try:
                 lookup_result = self.lookup.lookup(candidate.content, scope, candidate.type)
             except IndexLookupError as exc:
-                return WriteReport(
-                    request_id=request_id,
-                    status=WriteStatus.RETRYABLE,
-                    extracted_count=len(extracted),
-                    filtered_count=batch.filtered_count,
-                    retryable=True,
-                    error_code=ErrorCode.INDEX_UNAVAILABLE,
-                    error_message=str(exc),
-                )
-            histories = [
-                item.record
-                for item in lookup_result.matches
-                if item.record.id not in inactive_ids
-            ] + [
-                item for item in pending if item.type is candidate.type
-            ]
+                raise _WriteAborted(
+                    self._failure(
+                        request_id,
+                        ErrorCode.INDEX_UNAVAILABLE,
+                        exc,
+                        retryable=True,
+                        extracted_count=extracted_count,
+                        filtered_count=batch.filtered_count,
+                    )
+                ) from exc
+            histories = state.visible_histories(
+                [item.record for item in lookup_result.matches],
+                candidate.type,
+            )
             try:
                 relations = self.resolver.resolve(candidate, histories)
                 similarities = {
@@ -243,213 +333,144 @@ class MemoryWritePipeline:
                 ]
                 plan = self.decision_engine.decide(index, candidate, histories, relations)
             except RelationOutputError as exc:
-                return WriteReport(
-                    request_id=request_id,
-                    status=WriteStatus.FAILED,
-                    extracted_count=len(extracted),
-                    filtered_count=batch.filtered_count,
-                    error_code=ErrorCode.RELATION_FAILED,
-                    error_message=str(exc),
-                )
+                raise self._relation_abort(
+                    request_id, exc, extracted_count, batch.filtered_count
+                ) from exc
             except (
                 APIConnectionError,
                 APITimeoutError,
                 RateLimitError,
                 InternalServerError,
             ) as exc:
-                return WriteReport(
-                    request_id=request_id,
-                    status=WriteStatus.RETRYABLE,
-                    extracted_count=len(extracted),
-                    filtered_count=batch.filtered_count,
+                raise self._relation_abort(
+                    request_id,
+                    exc,
+                    extracted_count,
+                    batch.filtered_count,
                     retryable=True,
-                    error_code=ErrorCode.RELATION_FAILED,
-                    error_message=str(exc),
-                )
+                ) from exc
             except AmbiguousDecision as exc:
-                return WriteReport(
-                    request_id=request_id,
-                    status=WriteStatus.FAILED,
-                    extracted_count=len(extracted),
-                    filtered_count=batch.filtered_count,
-                    error_code=ErrorCode.AMBIGUOUS_RELATION,
-                    error_message=str(exc),
-                )
-            if plan.action in (Action.ADD, Action.UPDATE):
-                if plan.action is Action.UPDATE:
-                    inactive_ids.update(plan.target_ids)
-                    pending = [
-                        item for item in pending if item.id not in plan.target_ids
-                    ]
-                memory_id = str(uuid4())
-                plan = plan.model_copy(update={"new_memory_id": memory_id})
-                pending.append(
-                    MemoryRecord(
-                        id=memory_id,
-                        scope=scope,
-                        type=candidate.type,
-                        content=candidate.content,
-                        importance=candidate.importance,
-                        confidence=candidate.confidence,
-                        validity=Validity.ACTIVE,
-                        event_frame=candidate.event_frame,
-                        metadata=candidate.metadata,
+                raise _WriteAborted(
+                    self._failure(
+                        request_id,
+                        ErrorCode.AMBIGUOUS_RELATION,
+                        exc,
+                        extracted_count=extracted_count,
+                        filtered_count=batch.filtered_count,
                     )
+                ) from exc
+            if plan.action in (Action.ADD, Action.UPDATE):
+                plan = state.stage_materialized(
+                    plan,
+                    scope=scope,
+                    memory_id=str(uuid4()),
                 )
             elif plan.action is Action.DEFER:
-                now = datetime.now(UTC)
-                existing_group = next(
-                    (
-                        group
-                        for group in deferred_groups
-                        if set(group.conflicting_memory_ids) & set(plan.target_ids)
-                        or self.reconciler._group_frames_related(
-                            group.grouped_candidates
-                            or (group.candidate,),
-                            candidate,
-                        )
-                    ),
-                    None,
+                pending_resolution = self.deferred_collector.collect(
+                    state.deferred_groups,
+                    scope=scope,
+                    plan=plan,
+                    messages=messages,
                 )
-                if existing_group is None:
-                    pending_resolution = PendingResolution(
-                        id=str(uuid4()),
-                        scope=scope,
-                        candidate=candidate,
-                        grouped_candidates=(candidate,),
-                        conflicting_memory_ids=plan.target_ids,
-                        semantic_relation=plan.relation
-                        or next(
-                            (
-                                item.relation
-                                for item in plan.matches
-                                if item.relation.value != "none"
-                            ),
-                            None,
-                        )
-                        or plan.matches[0].relation,
-                        missing_dimensions=missing_event_dimensions(candidate),
-                        reason=plan.reason,
-                        source_message_ids=candidate.source_message_ids,
-                        source_messages=tuple(
-                            message
-                            for message in messages
-                            if message.message_id
-                            in candidate.source_message_ids
-                        ),
-                        processed_evidence_message_ids=candidate.source_message_ids,
-                        importance=candidate.importance,
-                        status=PendingResolutionStatus.OPEN,
-                        created_at=now,
-                        updated_at=now,
-                        last_evaluated_at=now,
-                        expires_at=self.pending_policy.expires_at(
-                            candidate.importance, now=now
-                        ),
-                    )
-                    deferred_groups.append(pending_resolution)
-                else:
-                    source_ids = tuple(
-                        dict.fromkeys(
-                            (
-                                *existing_group.source_message_ids,
-                                *candidate.source_message_ids,
-                            )
-                        )
-                    )
-                    pending_resolution = existing_group.model_copy(
-                        update={
-                            "grouped_candidates": (
-                                *existing_group.grouped_candidates,
-                                candidate,
-                            ),
-                            "conflicting_memory_ids": tuple(
-                                dict.fromkeys(
-                                    (
-                                        *existing_group.conflicting_memory_ids,
-                                        *plan.target_ids,
-                                    )
-                                )
-                            ),
-                            "source_message_ids": source_ids,
-                            "source_messages": tuple(
-                                {
-                                    message.message_id: message
-                                    for message in (
-                                        *existing_group.source_messages,
-                                        *messages,
-                                    )
-                                    if message.message_id in source_ids
-                                }.values()
-                            ),
-                            "processed_evidence_message_ids": tuple(
-                                dict.fromkeys(
-                                    (
-                                        *existing_group.processed_evidence_message_ids,
-                                        *candidate.source_message_ids,
-                                    )
-                                )
-                            ),
-                            "importance": max(
-                                existing_group.importance,
-                                candidate.importance,
-                            ),
-                            "updated_at": now,
-                        }
-                    )
-                    deferred_groups[
-                        deferred_groups.index(existing_group)
-                    ] = pending_resolution
                 plan = plan.model_copy(
                     update={"pending_resolution": pending_resolution}
                 )
-            plans.append(plan)
-            embeddings[index] = lookup_result.embedding
+            state.record(plan, embedding=lookup_result.embedding)
+
+    def _commit(
+        self,
+        *,
+        request_id: str,
+        input_hash: str,
+        scope: MemoryScope,
+        messages: list[Message],
+        state: WriteBatchState,
+        extracted_count: int,
+        filtered_count: int,
+    ) -> WriteReport:
+        """Commit the ordered plan once, then let the coordinator sync the index."""
 
         try:
             return self.coordinator.commit(
                 request_id=request_id,
                 input_hash=input_hash,
                 scope=scope,
-                plans=plans,
+                plans=state.plans,
                 messages=messages,
-                embeddings=embeddings,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
+                embeddings=state.embeddings,
+                extracted_count=extracted_count,
+                filtered_count=filtered_count,
             )
         except RequestAlreadyReserved as exc:
             current = self.repository.get_request(request_id, input_hash)
             if current is not None and current.report is not None:
                 return current.report
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.RETRYABLE,
+            return self._failure(
+                request_id,
+                ErrorCode.REQUEST_IN_PROGRESS,
+                exc,
                 retryable=True,
-                error_code=ErrorCode.REQUEST_IN_PROGRESS,
-                error_message=str(exc),
             )
         except StaleMemoryState as exc:
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.RETRYABLE,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
+            return self._failure(
+                request_id,
+                ErrorCode.REQUEST_IN_PROGRESS,
+                exc,
                 retryable=True,
-                error_code=ErrorCode.REQUEST_IN_PROGRESS,
-                error_message=str(exc),
+                extracted_count=extracted_count,
+                filtered_count=filtered_count,
             )
         except Exception as exc:
             current = self.repository.get_request(request_id, input_hash)
             if current is not None and current.report is not None:
                 return current.report
-            return WriteReport(
-                request_id=request_id,
-                status=WriteStatus.FAILED,
-                extracted_count=len(extracted),
-                filtered_count=batch.filtered_count,
-                error_code=ErrorCode.STORAGE_FAILED,
-                error_message=str(exc),
+            return self._failure(
+                request_id,
+                ErrorCode.STORAGE_FAILED,
+                exc,
+                extracted_count=extracted_count,
+                filtered_count=filtered_count,
             )
+
+    @staticmethod
+    def _relation_abort(
+        request_id: str,
+        error: Exception,
+        extracted_count: int,
+        filtered_count: int,
+        *,
+        retryable: bool = False,
+    ) -> _WriteAborted:
+        return _WriteAborted(
+            MemoryWritePipeline._failure(
+                request_id=request_id,
+                error_code=ErrorCode.RELATION_FAILED,
+                error=error,
+                retryable=retryable,
+                extracted_count=extracted_count,
+                filtered_count=filtered_count,
+            )
+        )
+
+    @staticmethod
+    def _failure(
+        request_id: str,
+        error_code: ErrorCode,
+        error: Exception,
+        *,
+        retryable: bool = False,
+        extracted_count: int = 0,
+        filtered_count: int = 0,
+    ) -> WriteReport:
+        return WriteReport(
+            request_id=request_id,
+            status=WriteStatus.RETRYABLE if retryable else WriteStatus.FAILED,
+            extracted_count=extracted_count,
+            filtered_count=filtered_count,
+            retryable=retryable,
+            error_code=error_code,
+            error_message=str(error),
+        )
 
     @staticmethod
     def _input_hash(scope: MemoryScope, messages: list[Message]) -> str:

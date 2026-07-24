@@ -732,6 +732,84 @@ Memory 通常会进入高优先级上下文，因此错误或恶意记忆的影�
 
 ## 7. agents_memory 落地
 
-> ⏳ 待深入
+### 7.1 顶层阶段与代码边界
+
+`MemoryWritePipeline.write()` 是阶段编排器，而不是所有规则的实现位置：
+
+```text
+request_id + scope + messages
+        │
+        ├─ _existing_request          幂等返回或继续未完成的索引同步
+        ├─ _extract_batch             抽取、来源校验、规范化与批内文本去重
+        ├─ _reconcile_pending         用本轮新证据重试同 scope 的历史 Pending
+        ├─ _apply_reconciliation_plans
+        │                             让已消解动作先进入批内工作视图
+        ├─ _plan_candidates           查找、关系判断和 ADD/UPDATE/NOOP/DEFER
+        └─ _commit                    一次提交 SQLite，再同步 Chroma
+```
+
+阶段拆分的目的不是增加层数，而是让失败边界可见：抽取失败、关系失败、索引查找失败和存储失败分别映射到稳定的 `WriteReport`，不能因为内部重构而互相混淆。
+
+### 7.2 WriteBatchState：提交前的工作视图
+
+同一轮可能抽取多条候选。后面的候选必须能看见前面已经规划、但尚未提交的结果，否则两个同义候选都可能被判断为 ADD，或者后续候选继续引用本批已经计划淘汰的旧版本。
+
+`WriteBatchState` 因此集中维护：
+
+- 有序 `plans`；
+- candidate index 对应的 `embeddings`；
+- 本批拟新增的 `staged_memories`；
+- 本批拟失效的 `inactive_ids`；
+- 本批形成的 `deferred_groups`。
+
+它只是规划期 overlay，不访问 Repository、不调用模型，也不是新的持久化领域模型。真正的事实仍只在 coordinator 的 SQLite 事务成功后成立。
+
+### 7.3 DeferredResolutionCollector：只负责归组
+
+`DeferredResolutionCollector` 将 DEFER 的创建与合并从主管线中隔离。它根据两类证据寻找已有 group：
+
+1. 与已有 group 共享冲突 memory target；
+2. 候选与 group 中每个事件框架都满足共享的 `group_frames_related()` 规则。
+
+collector 合并候选、冲突目标、来源消息、processed evidence、importance 和更新时间，但不写数据库。`event_matching.py` 中的纯函数同时供 collector 与 reconciler 使用，避免两个环节各自解释“是否相关”。
+
+### 7.4 PendingResolutionReconciler：证据驱动而非定时猜测
+
+reconciliation 内部顺序为：
+
+```text
+识别未处理的新 message_id
+    → 判断 expired / claimed-target obsolete
+    → 优先选择相关结构化 event candidate
+    → 无候选时再匹配相关原始消息
+    → 组合累积 assertion 与本轮 resolution evidence
+    → 从 SQLite 重新加载 active targets
+    → 重新执行 relation + decision
+    → 更新 OPEN / RESOLVED / OBSOLETE 状态
+```
+
+累积 assertion 是可能最终持久化的知识内容；`resolution_evidence` 只服务本轮关系判断，不能被误当成已经确认的事实正文。`processed_evidence_message_ids` 防止没有新信息时重复调用模型，`claimed_targets` 防止同一轮两个 Pending 同时更新同一目标。
+
+### 7.5 StorageCoordinator：单一提交边界
+
+`StorageCoordinator.commit()` 保留唯一写入事务：
+
+```text
+reserve request
+    → 依次应用 DEFER / NOOP / ADD / UPDATE
+    → 保存 memory、source、relation、pending
+    → 写入 index operation outbox
+    → 保存 committed WriteReport
+COMMIT SQLite
+    → 同步 Chroma
+```
+
+内部 helper 可以分别解释不同 Action，但必须复用顶层传入的 transaction connection，不能自行提交。SQLite 是 truth；Chroma 同步失败时，committed report 与 outbox 允许 `repair_request()` 或 `repair_index()` 恢复派生索引。
+
+UPDATE 也不是原地覆盖：
+
+- 明确纠错：旧版本 `RETRACTED`，关系为 `CORRECTS`；
+- 状态变化或普通矛盾：旧版本 `SUPERSEDED`，关系为 `SUPERSEDES`；
+- 新版本始终以新的 memory ID 追加。
 
 ---

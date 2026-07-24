@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -30,6 +31,8 @@ class RequestAlreadyReserved(RuntimeError):
 
 
 class StorageCoordinator:
+    """Commit SQLite truth atomically, then converge the derivative index."""
+
     def __init__(
         self,
         repository: MemoryRepository,
@@ -52,6 +55,8 @@ class StorageCoordinator:
         extracted_count: int,
         filtered_count: int,
     ) -> WriteReport:
+        """Apply every plan in one visible transaction before index synchronization."""
+
         by_message = {message.message_id: message for message in messages}
         results: list[CandidateResult] = []
         initial_embeddings: dict[str, list[float]] = {}
@@ -69,148 +74,21 @@ class StorageCoordinator:
                         }
                     )
                 if plan.action is Action.DEFER:
-                    pending = plan.pending_resolution
-                    if pending is None:
-                        raise ValueError("DEFER plan requires pending resolution")
-                    self.repository.save_pending_resolution(
-                        pending, connection=connection
-                    )
-                    results.append(
-                        CandidateResult(
-                            candidate_index=plan.candidate_index,
-                            content=plan.candidate.content,
-                            action=Action.DEFER,
-                            resolution_id=pending.id,
-                            resolution_status=pending.status,
-                            replaced_memory_ids=plan.target_ids,
-                            matches=plan.matches,
-                            missing_dimensions=pending.missing_dimensions,
-                            reason=plan.reason or pending.reason,
-                        )
-                    )
+                    results.append(self._apply_defer_plan(plan, connection))
                     continue
                 if plan.action is Action.NOOP:
-                    if plan.pending_resolution is not None:
-                        self.repository.save_pending_resolution(
-                            plan.pending_resolution, connection=connection
-                        )
-                    results.append(
-                        CandidateResult(
-                            candidate_index=plan.candidate_index,
-                            content=plan.candidate.content,
-                            action=Action.NOOP,
-                            memory_id=plan.target_ids[0] if plan.target_ids else None,
-                            resolution_id=(
-                                plan.pending_resolution.id
-                                if plan.pending_resolution
-                                else None
-                            ),
-                            resolution_status=(
-                                plan.pending_resolution.status
-                                if plan.pending_resolution
-                                else None
-                            ),
-                            replaced_memory_ids=plan.target_ids,
-                            matches=plan.matches,
-                            reason=plan.reason,
-                        )
-                    )
+                    results.append(self._apply_noop_plan(plan, connection))
                     continue
 
-                memory_id = plan.new_memory_id or str(uuid4())
-                now = datetime.now(UTC)
-                record = MemoryRecord(
-                    id=memory_id,
-                    scope=scope,
-                    type=plan.candidate.type,
-                    content=plan.candidate.content,
-                    importance=plan.candidate.importance,
-                    confidence=plan.candidate.confidence,
-                    validity=Validity.ACTIVE,
-                    created_at=now,
-                    updated_at=now,
-                    valid_from=now,
-                    event_frame=plan.candidate.event_frame,
-                    metadata=plan.candidate.metadata,
-                )
-                sources = tuple(
-                    MemorySource(
-                        memory_id=memory_id,
-                        message_id=message_id,
-                        role=by_message[message_id].role,
-                        source_kind=SourceKind(
-                            plan.candidate.metadata.get(
-                                "_source_kinds", {}
-                            ).get(
-                                message_id,
-                                plan.candidate.source_kind.value,
-                            )
-                        ),
-                        excerpt=by_message[message_id].content,
-                    )
-                    for message_id in plan.candidate.source_message_ids
-                )
-                self.repository.save_memory(record, sources, connection=connection)
-
-                if plan.action is Action.UPDATE:
-                    validity = (
-                        Validity.RETRACTED
-                        if plan.relation is RelationKind.CORRECT
-                        else Validity.SUPERSEDED
-                    )
-                    persistent_relation = (
-                        RelationKind.CORRECTS
-                        if plan.relation is RelationKind.CORRECT
-                        else RelationKind.SUPERSEDES
-                    )
-                    for target_id in plan.target_ids:
-                        self.repository.transition(
-                            target_id,
-                            validity,
-                            MemoryRelation(
-                                from_memory_id=target_id,
-                                to_memory_id=memory_id,
-                                relation=persistent_relation,
-                            ),
-                            connection=connection,
-                        )
-                        self.repository.enqueue_index_operation(
-                            request_id,
-                            target_id,
-                            IndexOperationKind.DELETE,
-                            connection=connection,
-                        )
-
-                self.repository.enqueue_index_operation(
-                    request_id,
-                    memory_id,
-                    IndexOperationKind.UPSERT,
-                    connection=connection,
-                )
-                initial_embeddings[memory_id] = embeddings[plan.candidate_index]
-                if plan.pending_resolution is not None:
-                    self.repository.save_pending_resolution(
-                        plan.pending_resolution, connection=connection
-                    )
                 results.append(
-                    CandidateResult(
-                        candidate_index=plan.candidate_index,
-                        content=plan.candidate.content,
-                        action=plan.action,
-                        memory_id=memory_id,
-                        resolution_id=(
-                            plan.pending_resolution.id
-                            if plan.pending_resolution
-                            else None
-                        ),
-                        resolution_status=(
-                            plan.pending_resolution.status
-                            if plan.pending_resolution
-                            else None
-                        ),
-                        replaced_memory_ids=plan.target_ids,
-                        matches=plan.matches,
-                        reason=plan.reason,
+                    self._apply_memory_plan(
+                        request_id=request_id,
+                        scope=scope,
+                        plan=plan,
+                        by_message=by_message,
+                        embeddings=embeddings,
+                        initial_embeddings=initial_embeddings,
+                        connection=connection,
                     )
                 )
 
@@ -238,6 +116,179 @@ class StorageCoordinator:
             input_hash,
             committed_report,
             initial_embeddings,
+        )
+
+    def _apply_defer_plan(
+        self,
+        plan: ActionPlan,
+        connection: sqlite3.Connection,
+    ) -> CandidateResult:
+        """Persist ambiguity without creating active memory or index work."""
+
+        pending = plan.pending_resolution
+        if pending is None:
+            raise ValueError("DEFER plan requires pending resolution")
+        self.repository.save_pending_resolution(pending, connection=connection)
+        return self._build_result(
+            plan,
+            missing_dimensions=pending.missing_dimensions,
+            reason=plan.reason or pending.reason,
+        )
+
+    def _apply_noop_plan(
+        self,
+        plan: ActionPlan,
+        connection: sqlite3.Connection,
+    ) -> CandidateResult:
+        """Persist a pending lifecycle transition while leaving memory unchanged."""
+
+        if plan.pending_resolution is not None:
+            self.repository.save_pending_resolution(
+                plan.pending_resolution,
+                connection=connection,
+            )
+        return self._build_result(
+            plan,
+            memory_id=plan.target_ids[0] if plan.target_ids else None,
+        )
+
+    def _apply_memory_plan(
+        self,
+        *,
+        request_id: str,
+        scope: MemoryScope,
+        plan: ActionPlan,
+        by_message: dict[str, Message],
+        embeddings: dict[int, list[float]],
+        initial_embeddings: dict[str, list[float]],
+        connection: sqlite3.Connection,
+    ) -> CandidateResult:
+        """Persist ADD/UPDATE truth and enqueue the matching index operations."""
+
+        memory_id = plan.new_memory_id or str(uuid4())
+        now = datetime.now(UTC)
+        record = MemoryRecord(
+            id=memory_id,
+            scope=scope,
+            type=plan.candidate.type,
+            content=plan.candidate.content,
+            importance=plan.candidate.importance,
+            confidence=plan.candidate.confidence,
+            validity=Validity.ACTIVE,
+            created_at=now,
+            updated_at=now,
+            valid_from=now,
+            event_frame=plan.candidate.event_frame,
+            metadata=plan.candidate.metadata,
+        )
+        self.repository.save_memory(
+            record,
+            self._build_sources(memory_id, plan, by_message),
+            connection=connection,
+        )
+        if plan.action is Action.UPDATE:
+            self._transition_targets(
+                request_id,
+                plan,
+                memory_id,
+                connection,
+            )
+        self.repository.enqueue_index_operation(
+            request_id,
+            memory_id,
+            IndexOperationKind.UPSERT,
+            connection=connection,
+        )
+        initial_embeddings[memory_id] = embeddings[plan.candidate_index]
+        if plan.pending_resolution is not None:
+            self.repository.save_pending_resolution(
+                plan.pending_resolution,
+                connection=connection,
+            )
+        return self._build_result(plan, memory_id=memory_id)
+
+    @staticmethod
+    def _build_sources(
+        memory_id: str,
+        plan: ActionPlan,
+        by_message: dict[str, Message],
+    ) -> tuple[MemorySource, ...]:
+        """Preserve the source kind of each message across resolution rounds."""
+
+        source_kinds = plan.candidate.metadata.get("_source_kinds", {})
+        return tuple(
+            MemorySource(
+                memory_id=memory_id,
+                message_id=message_id,
+                role=by_message[message_id].role,
+                source_kind=SourceKind(
+                    source_kinds.get(
+                        message_id,
+                        plan.candidate.source_kind.value,
+                    )
+                ),
+                excerpt=by_message[message_id].content,
+            )
+            for message_id in plan.candidate.source_message_ids
+        )
+
+    def _transition_targets(
+        self,
+        request_id: str,
+        plan: ActionPlan,
+        memory_id: str,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Translate correction versus supersession into persistent history."""
+
+        validity = (
+            Validity.RETRACTED
+            if plan.relation is RelationKind.CORRECT
+            else Validity.SUPERSEDED
+        )
+        persistent_relation = (
+            RelationKind.CORRECTS
+            if plan.relation is RelationKind.CORRECT
+            else RelationKind.SUPERSEDES
+        )
+        for target_id in plan.target_ids:
+            self.repository.transition(
+                target_id,
+                validity,
+                MemoryRelation(
+                    from_memory_id=target_id,
+                    to_memory_id=memory_id,
+                    relation=persistent_relation,
+                ),
+                connection=connection,
+            )
+            self.repository.enqueue_index_operation(
+                request_id,
+                target_id,
+                IndexOperationKind.DELETE,
+                connection=connection,
+            )
+
+    @staticmethod
+    def _build_result(
+        plan: ActionPlan,
+        *,
+        memory_id: str | None = None,
+        missing_dimensions: tuple[str, ...] = (),
+        reason: str | None = None,
+    ) -> CandidateResult:
+        pending = plan.pending_resolution
+        return CandidateResult(
+            candidate_index=plan.candidate_index,
+            content=plan.candidate.content,
+            action=plan.action,
+            memory_id=memory_id,
+            resolution_id=pending.id if pending else None,
+            resolution_status=pending.status if pending else None,
+            replaced_memory_ids=plan.target_ids,
+            matches=plan.matches,
+            missing_dimensions=missing_dimensions,
+            reason=plan.reason if reason is None else reason,
         )
 
     def repair_request(self, request_id: str, input_hash: str) -> WriteReport:

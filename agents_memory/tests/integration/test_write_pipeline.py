@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from agents_memory.models import EventFrame, EventIdentity, EventStatus, TemporalRelation
 from agents_memory.extraction.base import FakeFactExtractor
 from agents_memory.extraction.llm import ExtractionOutputError
@@ -21,8 +23,8 @@ from agents_memory.processing.decision import AmbiguousDecision
 from agents_memory.resolution.llm import RelationOutputError
 from agents_memory.retrieval.lookup import HistoricalMatch, LookupResult
 from agents_memory.retrieval.lookup import IndexLookupError
-from agents_memory.storage.coordinator import StorageCoordinator
-from agents_memory.storage.repository import MemoryRepository
+from agents_memory.storage.coordinator import RequestAlreadyReserved, StorageCoordinator
+from agents_memory.storage.repository import MemoryRepository, StaleMemoryState
 
 
 class InMemoryIndex:
@@ -667,3 +669,26 @@ def test_pipeline_rejects_idempotency_key_with_different_input(tmp_path: Path) -
     assert report.status is WriteStatus.FAILED
     assert report.error_code.value == "idempotency_conflict"
     assert len(repository.list_memories(MemoryScope(user_id="u1"))) == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RequestAlreadyReserved("busy"), StaleMemoryState("stale")],
+)
+def test_pipeline_classifies_concurrent_commit_as_retryable(
+    tmp_path: Path,
+    error: Exception,
+) -> None:
+    subject, repository, _ = pipeline(tmp_path, [candidate("用户偏好 Python")])
+
+    class ConcurrentCoordinator:
+        def commit(self, **_kwargs):
+            raise error
+
+    subject.coordinator = ConcurrentCoordinator()
+    report = write(subject, f"req-{type(error).__name__}")
+
+    assert report.status is WriteStatus.RETRYABLE
+    assert report.retryable
+    assert report.error_code.value == "request_in_progress"
+    assert repository.list_memories(MemoryScope(user_id="u1")) == []

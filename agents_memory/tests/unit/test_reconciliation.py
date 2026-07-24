@@ -25,6 +25,10 @@ from agents_memory.models import (
     Validity,
 )
 from agents_memory.processing.decision import DecisionEngine
+from agents_memory.processing.event_matching import (
+    frames_related,
+    group_frames_related,
+)
 from agents_memory.processing.reconciliation import PendingResolutionReconciler
 from agents_memory.storage.repository import MemoryRepository
 
@@ -400,11 +404,11 @@ def test_reconciler_rejects_reused_message_id_with_different_content(
 
 
 def test_sparse_frames_are_not_related_by_actor_alone() -> None:
-    assert not PendingResolutionReconciler._frames_related(
+    assert not frames_related(
         EventFrame(actor="user"),
         EventFrame(actor="user"),
     )
-    assert not PendingResolutionReconciler._frames_related(None, None)
+    assert not frames_related(None, None)
 
 
 def test_group_frame_matching_rejects_conflict_hidden_by_sparse_first() -> None:
@@ -428,9 +432,7 @@ def test_group_frame_matching_rejects_conflict_hidden_by_sparse_first() -> None:
         }
     )
 
-    assert not PendingResolutionReconciler._group_frames_related(
-        (sparse, beijing), shanghai
-    )
+    assert not group_frames_related((sparse, beijing), shanghai)
 
 
 def test_tool_verified_candidate_can_evidence_user_pending(
