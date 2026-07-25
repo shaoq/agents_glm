@@ -43,12 +43,12 @@
 
 ## 5. Explainable utility scoring
 
-- [ ] 5.1 Add failing tests for normalized semantic, task, temporal, scope, trust, hit-robustness, and bounded-importance score components
-- [ ] 5.2 Implement deterministic base scoring with configurable weights and component-level explanations
-- [ ] 5.3 Add failing tests for bounded LLM batch review, provisional evidence roles, missing components, and score re-normalization
-- [ ] 5.4 Implement the GLM-4.7-Flash batch reviewer and transparent score combination without accepting an opaque model total
-- [ ] 5.5 Add failing tests proving high similarity or importance cannot override low task contribution and LLM failure preserves deterministic scoring
-- [ ] 5.6 Implement scoring fallback, score-confidence metadata, and candidate limits for LLM review
+- [x] 5.1 Add failing tests for normalized semantic, task, temporal, scope, trust, hit-robustness, and bounded-importance score components
+- [x] 5.2 Implement deterministic base scoring with configurable weights and component-level explanations
+- [x] 5.3 Add failing tests for bounded LLM batch review, provisional evidence roles, missing components, and score re-normalization
+- [x] 5.4 Implement the GLM-4.7-Flash batch reviewer and transparent score combination without accepting an opaque model total
+- [x] 5.5 Add failing tests proving high similarity or importance cannot override low task contribution and LLM failure preserves deterministic scoring
+- [x] 5.6 Implement scoring fallback, score-confidence metadata, and candidate limits for LLM review
 
 ## 6. Temporal, relational, and conflict evidence
 
