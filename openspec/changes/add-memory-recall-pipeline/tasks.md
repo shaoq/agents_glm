@@ -38,8 +38,8 @@
 - [ ] 4.4 Implement temporal candidate reads and bounded one-hop relationship expansion with repeated user/scope validation
 - [ ] 4.5 Add failing tests for stale Chroma records, missing-index ACTIVE records, temporary similarity, and read-only unsynced coverage
 - [ ] 4.6 Implement SQLite hydration, stale-index rejection, and the bounded unsynced overlay
-- [ ] 4.7 Add failing Eligibility Filter tests for cross-user records, unauthorized scopes, validity modes, explicit type/time constraints, and corrupt records
-- [ ] 4.8 Implement deterministic eligibility filtering and stable rejection-reason diagnostics
+- [x] 4.7 Add failing Eligibility Filter tests for cross-user records, unauthorized scopes, validity modes, explicit type/time constraints, and corrupt records
+- [x] 4.8 Implement deterministic eligibility filtering and stable rejection-reason diagnostics
 
 ## 5. Explainable utility scoring
 
