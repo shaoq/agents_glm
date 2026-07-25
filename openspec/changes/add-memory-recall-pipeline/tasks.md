@@ -64,14 +64,14 @@
 
 ## 7. Set selection and context assembly
 
-- [ ] 7.1 Add failing tests for direct-evidence priority, uncovered-need coverage, complementary evidence, redundancy penalties, and deterministic tie-breaking
-- [ ] 7.2 Implement explainable marginal-value EvidenceGroup selection
-- [ ] 7.3 Add failing tests for atomic conflict groups, long evolution-chain compression, evidence-count limits, and Token hard limits
-- [ ] 7.4 Implement conflict-safe budget handling, key-history selection, and conservative token estimation fallback
-- [ ] 7.5 Add failing Context Assembler tests for stable semantic sections, evidence-ID traceability, time/role/source labels, and neutral uncertainty wording
-- [ ] 7.6 Implement deterministic context rendering without generative summarization or renewed evidence decisions
-- [ ] 7.7 Add failing tests for `SUFFICIENT`, `PARTIAL`, `CONFLICTED`, and `EMPTY` independently from `COMPLETE` and `DEGRADED`
-- [ ] 7.8 Implement result sufficiency, execution status, metadata, and diagnostic-detail gating
+- [x] 7.1 Add failing tests for direct-evidence priority, uncovered-need coverage, complementary evidence, redundancy penalties, and deterministic tie-breaking
+- [x] 7.2 Implement explainable marginal-value EvidenceGroup selection
+- [x] 7.3 Add failing tests for atomic conflict groups, long evolution-chain compression, evidence-count limits, and Token hard limits
+- [x] 7.4 Implement conflict-safe budget handling, key-history selection, and conservative token estimation fallback
+- [x] 7.5 Add failing Context Assembler tests for stable semantic sections, evidence-ID traceability, time/role/source labels, and neutral uncertainty wording
+- [x] 7.6 Implement deterministic context rendering without generative summarization or renewed evidence decisions
+- [x] 7.7 Add failing tests for `SUFFICIENT`, `PARTIAL`, `CONFLICTED`, and `EMPTY` independently from `COMPLETE` and `DEGRADED`
+- [x] 7.8 Implement result sufficiency, execution status, metadata, and diagnostic-detail gating
 
 ## 8. Pipeline degradation and consistency
 
