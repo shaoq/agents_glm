@@ -16,9 +16,9 @@ Degradation model:
 
 from typing import Protocol
 
+from agents_memory.recall.diagnostics import RecallDiagnostics
 from agents_memory.recall.models import (
     ContextAssembly,
-    DegradationCode,
     EligibleCandidate,
     EvidenceGroup,
     ExecutionStatus,
@@ -30,39 +30,6 @@ from agents_memory.recall.models import (
     RetrievedCandidate,
     ScoredCandidate,
 )
-
-
-class RecallDiagnostics:
-    """Mutable accumulator for degradations and notes during one Recall run.
-
-    Stage results stay immutable (``FrozenModel``); this object only collects
-    execution-time diagnostics that are later folded into the frozen
-    ``RecallMetadata``.
-    """
-
-    __slots__ = ("_degradations", "_notes")
-
-    def __init__(self) -> None:
-        self._degradations: list[DegradationCode] = []
-        self._notes: list[str] = []
-
-    def degrade(self, code: DegradationCode, note: str = "") -> None:
-        if code not in self._degradations:
-            self._degradations.append(code)
-        if note:
-            self._notes.append(f"{code.value}: {note}")
-
-    def note(self, text: str) -> None:
-        if text:
-            self._notes.append(text)
-
-    @property
-    def degradations(self) -> tuple[DegradationCode, ...]:
-        return tuple(self._degradations)
-
-    @property
-    def notes(self) -> tuple[str, ...]:
-        return tuple(self._notes)
 
 
 class IntentBuilder(Protocol):

@@ -23,12 +23,12 @@
 
 ## 3. Intent construction and deterministic planning
 
-- [ ] 3.1 Add failing tests for structured intent extraction, explicit-versus-inferred constraints, and bounded query variants
-- [ ] 3.2 Implement the Recall Intent Builder protocol, GLM-4.7-Flash structured implementation, prompt, schema validation, and normalization
-- [ ] 3.3 Add failing tests for timeout, malformed output, low-confidence output, and original-query fallback
-- [ ] 3.4 Implement the conservative deterministic intent fallback and stable fallback diagnostics
-- [ ] 3.5 Add failing Planner tests for session, agent-history, and user-shared lanes, caller narrowing, lane quotas, and global hard limits
-- [ ] 3.6 Implement deterministic Recall planning with authorization-aware lanes and bounded path budgets
+- [x] 3.1 Add failing tests for structured intent extraction, explicit-versus-inferred constraints, and bounded query variants
+- [x] 3.2 Implement the Recall Intent Builder protocol, GLM-4.7-Flash structured implementation, prompt, schema validation, and normalization
+- [x] 3.3 Add failing tests for timeout, malformed output, low-confidence output, and original-query fallback
+- [x] 3.4 Implement the conservative deterministic intent fallback and stable fallback diagnostics
+- [x] 3.5 Add failing Planner tests for session, agent-history, and user-shared lanes, caller narrowing, lane quotas, and global hard limits
+- [x] 3.6 Implement deterministic Recall planning with authorization-aware lanes and bounded path budgets
 
 ## 4. Candidate retrieval and eligibility
 
