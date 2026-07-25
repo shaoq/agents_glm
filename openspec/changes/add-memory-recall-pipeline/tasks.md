@@ -75,13 +75,13 @@
 
 ## 8. Pipeline degradation and consistency
 
-- [ ] 8.1 Add failing end-to-end fake tests for intent, rewrite, embedding, Chroma, lane, scoring, resolution, and tokenizer failures
-- [ ] 8.2 Implement the stable degradation matrix, global deadline, bounded retry policy, and partial-lane result handling
-- [ ] 8.3 Add failing tests proving SQLite or authorization-validation failure is fatal and unvalidated candidates never enter results
-- [ ] 8.4 Implement fatal-error boundaries and domain-error propagation
-- [ ] 8.5 Add failing tests for immutable logical snapshots, final record revalidation, whole-group invalidation, one reselection, and persistent drift failure
-- [ ] 8.6 Implement final state revalidation and at-most-once reselection without holding a long SQLite transaction
-- [ ] 8.7 Add a read-only integration assertion that Recall does not change memories, relations, index operations, write requests, or pending resolutions
+- [x] 8.1 Add failing end-to-end fake tests for intent, rewrite, embedding, Chroma, lane, scoring, resolution, and tokenizer failures
+- [x] 8.2 Implement the stable degradation matrix, global deadline, bounded retry policy, and partial-lane result handling
+- [x] 8.3 Add failing tests proving SQLite or authorization-validation failure is fatal and unvalidated candidates never enter results
+- [x] 8.4 Implement fatal-error boundaries and domain-error propagation
+- [x] 8.5 Add failing tests for immutable logical snapshots, final record revalidation, whole-group invalidation, one reselection, and persistent drift failure
+- [x] 8.6 Implement final state revalidation and at-most-once reselection without holding a long SQLite transaction
+- [x] 8.7 Add a read-only integration assertion that Recall does not change memories, relations, index operations, write requests, or pending resolutions
 
 ## 9. Service, configuration, and CLI
 

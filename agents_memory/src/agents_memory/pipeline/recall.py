@@ -14,11 +14,12 @@ Degradation model:
   verify candidates.
 """
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from agents_memory.recall.diagnostics import RecallDiagnostics
 from agents_memory.recall.models import (
     ContextAssembly,
+    DegradationCode,
     EligibleCandidate,
     EvidenceGroup,
     ExecutionStatus,
@@ -123,6 +124,7 @@ class MemoryRecallPipeline:
         resolver: EvidenceResolver,
         selector: SetSelector,
         assembler: ContextAssembler,
+        repository: Any = None,
     ) -> None:
         self.intent_builder = intent_builder
         self.planner = planner
@@ -132,6 +134,7 @@ class MemoryRecallPipeline:
         self.resolver = resolver
         self.selector = selector
         self.assembler = assembler
+        self.repository = repository
 
     def run(self, request: RecallRequest) -> RecallResult:
         diag = RecallDiagnostics()
@@ -142,6 +145,7 @@ class MemoryRecallPipeline:
         scored = self.scorer.score(request, eligible, diag)
         groups = self.resolver.resolve(request, scored, diag)
         selected = self.selector.select(request, groups, diag)
+        selected = self._final_revalidation(request, selected, groups, diag)
         assembly = self.assembler.assemble(request, selected, diag)
         metadata = RecallMetadata(
             intent_summary=assembly.intent_summary,
@@ -161,3 +165,47 @@ class MemoryRecallPipeline:
             evidence=selected,
             metadata=metadata,
         )
+
+    def _final_revalidation(
+        self,
+        request: RecallRequest,
+        selected: tuple[EvidenceGroup, ...],
+        groups: tuple[EvidenceGroup, ...],
+        diag: RecallDiagnostics,
+    ) -> tuple[EvidenceGroup, ...]:
+        """Lightweight final-state revalidation before assembly (design 12.7).
+
+        Reselects once from still-present groups if any selected memory drifted
+        (deleted between scoring and output). Does not hold a long transaction.
+        """
+
+        if self.repository is None or not selected:
+            return selected
+        memory_ids = tuple(mid for group in selected for mid in _group_memory_ids(group))
+        if not memory_ids:
+            return selected
+        try:
+            records = self.repository.revalidate_final_state(memory_ids, user_id=request.user_id)
+        except Exception as exc:  # noqa: BLE001 (recoverable: keep selection)
+            diag.degrade(DegradationCode.INCOMPLETE_RELATION_CHAIN, type(exc).__name__)
+            return selected
+        present = {record.id for record in records}
+        if all(mid in present for group in selected for mid in _group_memory_ids(group)):
+            return selected
+        diag.note("final state drift: reselected once")
+        stable = tuple(
+            group for group in groups if all(mid in present for mid in _group_memory_ids(group))
+        )
+        return self.selector.select(request, stable, diag)
+
+
+def _group_memory_ids(group: EvidenceGroup) -> tuple[str, ...]:
+    return tuple(
+        item.memory_id
+        for item in (
+            group.primary,
+            *group.supporting,
+            *group.historical,
+            *group.conflicting,
+        )
+    )

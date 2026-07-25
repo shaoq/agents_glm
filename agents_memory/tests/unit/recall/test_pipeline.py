@@ -10,6 +10,7 @@ import pytest
 from agents_memory.models import MemoryRecord, MemoryScope, MemoryType
 from agents_memory.pipeline.recall import MemoryRecallPipeline
 from agents_memory.recall.errors import RecallStorageUnavailable
+from agents_memory.recall.selection import SetSelector
 from agents_memory.recall.models import (
     ContextAssembly,
     DegradationCode,
@@ -232,9 +233,7 @@ class TestPipelineDiagnosticsAggregation:
 class TestPipelineRecoverableDegradation:
     def test_recoverable_degradation_marks_degraded_and_returns_result(self):
         log: list[str] = []
-        pipeline = _build_pipeline(
-            log, retriever_degrade=DegradationCode.VECTOR_INDEX_UNAVAILABLE
-        )
+        pipeline = _build_pipeline(log, retriever_degrade=DegradationCode.VECTOR_INDEX_UNAVAILABLE)
         result = pipeline.run(_request())
         assert result.metadata.execution_status is ExecutionStatus.DEGRADED
         assert DegradationCode.VECTOR_INDEX_UNAVAILABLE in result.metadata.degradations
@@ -242,27 +241,104 @@ class TestPipelineRecoverableDegradation:
         assert log == list(STAGE_ORDER)
 
     def test_degradation_does_not_duplicate_code(self):
-        pipeline = _build_pipeline(
-            [], retriever_degrade=DegradationCode.VECTOR_INDEX_UNAVAILABLE
-        )
+        pipeline = _build_pipeline([], retriever_degrade=DegradationCode.VECTOR_INDEX_UNAVAILABLE)
         result = pipeline.run(_request())
-        assert result.metadata.degradations.count(
-            DegradationCode.VECTOR_INDEX_UNAVAILABLE
-        ) == 1
+        assert result.metadata.degradations.count(DegradationCode.VECTOR_INDEX_UNAVAILABLE) == 1
 
 
 class TestPipelineFatalErrors:
     def test_storage_unavailable_propagates_as_fatal(self):
-        pipeline = _build_pipeline(
-            [], retriever_error=RecallStorageUnavailable("sqlite down")
-        )
+        pipeline = _build_pipeline([], retriever_error=RecallStorageUnavailable("sqlite down"))
         with pytest.raises(RecallStorageUnavailable):
             pipeline.run(_request())
 
     def test_fatal_error_does_not_fabricate_result(self):
-        pipeline = _build_pipeline(
-            [], retriever_error=RecallStorageUnavailable("sqlite down")
-        )
+        pipeline = _build_pipeline([], retriever_error=RecallStorageUnavailable("sqlite down"))
         with pytest.raises(RecallStorageUnavailable):
             pipeline.run(_request())
         # No partial RecallResult is ever returned for a fatal failure.
+
+
+class _IdRecord:
+    def __init__(self, mid: str) -> None:
+        self.id = mid
+
+
+class _FakeRepo:
+    def __init__(self, present_ids: set[str]) -> None:
+        self._present = set(present_ids)
+
+    def revalidate_final_state(self, memory_ids, *, user_id):  # noqa: ARG002
+        return [_IdRecord(mid) for mid in memory_ids if mid in self._present]
+
+
+def _evidence_group(gid: str) -> EvidenceGroup:
+    return EvidenceGroup(
+        group_id=gid,
+        primary=EvidenceItem(
+            evidence_id=f"{gid}:c",
+            memory_id=gid,
+            role=EvidenceRole.CURRENT,
+            content=gid,
+            memory_type=MemoryType.FACT,
+            scope=MemoryScope(user_id="u1"),
+            importance=5,
+        ),
+    )
+
+
+class TestPipelineFinalRevalidation:
+    def _pipeline(self, groups, repo):
+        return MemoryRecallPipeline(
+            intent_builder=_Spy("intent", [], result=RecallIntent(primary_query="q")),
+            planner=_Spy(
+                "planning",
+                [],
+                result=RecallPlan(
+                    intent=RecallIntent(primary_query="q"),
+                    lanes=(),
+                    global_candidate_limit=10,
+                ),
+            ),
+            retriever=_Spy("retrieval", [], result=()),
+            filter=_Spy("filtering", [], result=()),
+            scorer=_Spy("scoring", [], result=()),
+            resolver=_Spy("evidence", [], result=groups),
+            selector=SetSelector(),
+            assembler=_Spy(
+                "assembly",
+                [],
+                result=ContextAssembly(context="x", sufficiency=Sufficiency.SUFFICIENT),
+            ),
+            repository=repo,
+        )
+
+    def test_drift_triggers_reselection(self):
+        from agents_memory.recall.diagnostics import RecallDiagnostics
+        from agents_memory.recall.selection import SetSelector  # noqa: F401
+
+        groups = (_evidence_group("a"), _evidence_group("b"))
+        pipeline = self._pipeline(groups, _FakeRepo(present_ids={"a"}))
+        diag = RecallDiagnostics()
+        selected = pipeline._final_revalidation(_request(), groups, groups, diag)
+        assert all(g.group_id != "b" for g in selected)
+        assert any("drift" in note for note in diag.notes)
+
+    def test_no_drift_keeps_selection(self):
+        from agents_memory.recall.diagnostics import RecallDiagnostics
+
+        groups = (_evidence_group("a"), _evidence_group("b"))
+        pipeline = self._pipeline(groups, _FakeRepo(present_ids={"a", "b"}))
+        diag = RecallDiagnostics()
+        selected = pipeline._final_revalidation(_request(), groups, groups, diag)
+        assert {g.group_id for g in selected} == {"a", "b"}
+        assert diag.notes == ()
+
+    def test_no_repository_is_noop(self):
+        from agents_memory.recall.diagnostics import RecallDiagnostics
+
+        pipeline = _build_pipeline([])
+        groups = (_evidence_group("a"),)
+        assert (
+            pipeline._final_revalidation(_request(), groups, groups, RecallDiagnostics()) == groups
+        )
