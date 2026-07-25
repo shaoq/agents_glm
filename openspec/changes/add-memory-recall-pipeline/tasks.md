@@ -1,11 +1,11 @@
 ## 1. Baseline and Recall contracts
 
-- [ ] 1.1 Run the current `agents_memory` unit, integration, and architecture tests and record the clean baseline
-- [ ] 1.2 Add failing contract tests for Recall enums, public `RecallRequest`, public `RecallResult`, and validation invariants
-- [ ] 1.3 Create the `agents_memory.recall` package, public/internal Recall models, stable degradation codes, and Recall domain errors
-- [ ] 1.4 Add serialization and immutability tests for stage contracts and verify temporary Recall fields do not modify `MemoryRecord`
-- [ ] 1.5 Add failing pipeline-skeleton tests for seven-stage ordering, diagnostic aggregation, recoverable failures, and fatal failures
-- [ ] 1.6 Implement the dependency-injected `MemoryRecallPipeline` skeleton with fake-stage support
+- [x] 1.1 Run the current `agents_memory` unit, integration, and architecture tests and record the clean baseline
+- [x] 1.2 Add failing contract tests for Recall enums, public `RecallRequest`, public `RecallResult`, and validation invariants
+- [x] 1.3 Create the `agents_memory.recall` package, public/internal Recall models, stable degradation codes, and Recall domain errors
+- [x] 1.4 Add serialization and immutability tests for stage contracts and verify temporary Recall fields do not modify `MemoryRecord`
+- [x] 1.5 Add failing pipeline-skeleton tests for seven-stage ordering, diagnostic aggregation, recoverable failures, and fatal failures
+- [x] 1.6 Implement the dependency-injected `MemoryRecallPipeline` skeleton with fake-stage support
 
 ## 2. Additive storage and index reads
 
