@@ -52,10 +52,10 @@
 
 ## 6. Temporal, relational, and conflict evidence
 
-- [ ] 6.1 Add failing tests for event time versus record time, current-state lookup, point-in-time lookup, interval lookup, and state evolution
-- [ ] 6.2 Implement deterministic temporal-view resolution using event time, validity time, and explicit query intent
-- [ ] 6.3 Add failing tests for `SUPERSEDES` and `CORRECTS` chains, missing nodes, self-links, cycles, and cross-user relation rejection
-- [ ] 6.4 Implement bounded explicit-relation resolution and evidence roles without mutating stored validity or relations
+- [x] 6.1 Add failing tests for event time versus record time, current-state lookup, point-in-time lookup, interval lookup, and state evolution
+- [x] 6.2 Implement deterministic temporal-view resolution using event time, validity time, and explicit query intent
+- [x] 6.3 Add failing tests for `SUPERSEDES` and `CORRECTS` chains, missing nodes, self-links, cycles, and cross-user relation rejection
+- [x] 6.4 Implement bounded explicit-relation resolution and evidence roles without mutating stored validity or relations
 - [ ] 6.5 Add failing tests for same-event strong anchors, clearly separate events, and `UNKNOWN_EVENT_IDENTITY`
 - [ ] 6.6 Implement candidate bucketing and bounded same-event semantic review
 - [ ] 6.7 Add failing tests for natural evolution, resolvable correction, unresolved fact conflict, and unknown-identity plus contradictory content
