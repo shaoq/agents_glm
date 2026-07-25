@@ -32,12 +32,12 @@
 
 ## 4. Candidate retrieval and eligibility
 
-- [ ] 4.1 Add failing retrieval tests for multi-query semantic hits, per-lane quotas, global bounds, and `memory_id` deduplication with signal preservation
-- [ ] 4.2 Implement semantic candidate retrieval and cross-path candidate merging without using Write `ContextLookup`
-- [ ] 4.3 Add failing tests for structured temporal candidates, one-hop relation expansion, visited tracking, and expansion bounds
-- [ ] 4.4 Implement temporal candidate reads and bounded one-hop relationship expansion with repeated user/scope validation
-- [ ] 4.5 Add failing tests for stale Chroma records, missing-index ACTIVE records, temporary similarity, and read-only unsynced coverage
-- [ ] 4.6 Implement SQLite hydration, stale-index rejection, and the bounded unsynced overlay
+- [x] 4.1 Add failing retrieval tests for multi-query semantic hits, per-lane quotas, global bounds, and `memory_id` deduplication with signal preservation
+- [x] 4.2 Implement semantic candidate retrieval and cross-path candidate merging without using Write `ContextLookup`
+- [x] 4.3 Add failing tests for structured temporal candidates, one-hop relation expansion, visited tracking, and expansion bounds
+- [x] 4.4 Implement temporal candidate reads and bounded one-hop relationship expansion with repeated user/scope validation
+- [x] 4.5 Add failing tests for stale Chroma records, missing-index ACTIVE records, temporary similarity, and read-only unsynced coverage
+- [x] 4.6 Implement SQLite hydration, stale-index rejection, and the bounded unsynced overlay
 - [x] 4.7 Add failing Eligibility Filter tests for cross-user records, unauthorized scopes, validity modes, explicit type/time constraints, and corrupt records
 - [x] 4.8 Implement deterministic eligibility filtering and stable rejection-reason diagnostics
 
