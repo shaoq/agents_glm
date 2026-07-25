@@ -9,7 +9,7 @@
 
 ## 2. Additive storage and index reads
 
-- [ ] 2.1 Run GitNexus upstream impact analysis for `MemoryRepository`, report the blast radius, and stop for user direction if risk is HIGH or CRITICAL
+- [x] 2.1 Run GitNexus upstream impact analysis for `MemoryRepository`, report the blast radius, and stop for user direction if risk is HIGH or CRITICAL
 - [x] 2.2 Add failing Repository tests for bounded batch loading and user/agent/session/type scoped reads
 - [x] 2.3 Implement additive bounded batch and hierarchical read methods without changing existing Repository method semantics
 - [x] 2.4 Add failing Repository tests for temporal queries, eligible historical versions, and relation batch reads
@@ -85,23 +85,25 @@
 
 ## 9. Service, configuration, and CLI
 
-- [ ] 9.1 Run GitNexus upstream impact analysis for `MemoryService`, Settings validation, runtime construction, and CLI symbols before editing them; report HIGH or CRITICAL risk
-- [ ] 9.2 Add failing Settings tests for Recall defaults, hard limits, GLM-4.7-Flash configuration, and lazy `validate_recall()`
-- [ ] 9.3 Implement grouped Recall settings and validation without breaking storage-only or maintenance commands
-- [ ] 9.4 Add failing Service tests for injected Recall Pipeline, structured results, domain-error mapping, and Recall-not-configured behavior
-- [ ] 9.5 Implement `MemoryService.recall(...)` with optional Pipeline injection
-- [ ] 9.6 Add failing CLI tests for query/scope/time/type/budget arguments, human-readable output, JSON output, diagnostics, and failures
-- [ ] 9.7 Implement CLI `recall` using the same Service/Pipeline runtime and no duplicate recall logic
-- [ ] 9.8 Update package exports and CLI help while keeping existing commands and imports backward compatible
+- [x] 9.1 Run GitNexus upstream impact analysis for `MemoryService`, Settings validation, runtime construction, and CLI symbols before editing them; report HIGH or CRITICAL risk
+- [x] 9.2 Add failing Settings tests for Recall defaults, hard limits, GLM-4.7-Flash configuration, and lazy `validate_recall()`
+- [x] 9.3 Implement grouped Recall settings and validation without breaking storage-only or maintenance commands
+- [x] 9.4 Add failing Service tests for injected Recall Pipeline, structured results, domain-error mapping, and Recall-not-configured behavior
+- [x] 9.5 Implement `MemoryService.recall(...)` with optional Pipeline injection
+- [x] 9.6 Add failing CLI tests for query/scope/time/type/budget arguments, human-readable output, JSON output, diagnostics, and failures
+- [x] 9.7 Implement CLI `recall` using the same Service/Pipeline runtime and no duplicate recall logic
+- [x] 9.8 Update package exports and CLI help while keeping existing commands and imports backward compatible
 
 ## 10. End-to-end verification and documentation
 
-- [ ] 10.1 Add integration fixtures using real SQLite plus Fake Embedder, Fake Index, and Fake LLM
+- [x] 10.1 Add integration fixtures using real SQLite plus Fake Embedder, Fake Index, and Fake LLM
 - [ ] 10.2 Add end-to-end tests for current-session, agent-history, user-shared, current-state, point-in-time, evolution, correction, conflict, and unknown-event-identity scenarios
+  - Done (7/9): current-session, agent-history, user-shared, current-state, evolution, correction, conflict. Pending E2E: point-in-time, unknown-event-identity (logic covered by M6 unit tests `tests/unit/recall/test_evidence.py`).
 - [ ] 10.3 Add end-to-end tests for stale index, missing index, total LLM fallback, partial lane failure, cross-user rejection, budget pressure, concurrent drift, and complete empty results
-- [ ] 10.4 Extend architecture tests to reject imports, environment reads, database paths, or Chroma collections from sibling projects
-- [ ] 10.5 Run the full `agents_memory` test suite and correct only Recall-related regressions
-- [ ] 10.6 Update Recall implementation documentation, configuration example, package description, and CLI usage so they match delivered behavior
-- [ ] 10.7 Run `openspec validate add-memory-recall-pipeline --strict` and fix all proposal/spec consistency errors
-- [ ] 10.8 Run `gitnexus_detect_changes()` before commit, review affected symbols and execution flows, and confirm they match this proposal
-- [ ] 10.9 Run final formatting, static checks, `git diff --check`, and the complete test suite, recording evidence for handoff
+  - Done (6/8): stale index, missing index, total LLM fallback, cross-user rejection, budget pressure, complete empty. Pending E2E: partial lane failure, concurrent drift (logic covered by M8 unit tests).
+- [x] 10.4 Extend architecture tests to reject imports, environment reads, database paths, or Chroma collections from sibling projects
+- [x] 10.5 Run the full `agents_memory` test suite and correct only Recall-related regressions
+- [x] 10.6 Update Recall implementation documentation, configuration example, package description, and CLI usage so they match delivered behavior
+- [x] 10.7 Run `openspec validate add-memory-recall-pipeline --strict` and fix all proposal/spec consistency errors
+- [x] 10.8 Run `gitnexus_detect_changes()` before commit, review affected symbols and execution flows, and confirm they match this proposal
+- [x] 10.9 Run final formatting, static checks, `git diff --check`, and the complete test suite, recording evidence for handoff

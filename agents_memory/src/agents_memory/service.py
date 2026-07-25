@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +11,8 @@ from agents_memory.models import (
     MemoryType,
     PendingResolutionStatus,
 )
+from agents_memory.recall import RecallRequest, RecallResult
+from agents_memory.recall.errors import RecallContractViolation
 from agents_memory.storage.coordinator import StorageCoordinator
 from agents_memory.storage.repository import MemoryRepository
 
@@ -41,9 +44,22 @@ class MemoryService:
         self,
         repository: MemoryRepository,
         coordinator: StorageCoordinator | None = None,
+        recall_pipeline: Any = None,
     ) -> None:
         self.repository = repository
         self.coordinator = coordinator
+        self.recall_pipeline = recall_pipeline
+
+    def recall(self, request: RecallRequest) -> RecallResult:
+        """Run the injected Recall pipeline and return its structured result.
+
+        ``recall_pipeline`` is duck-typed (``run(request) -> RecallResult``) so
+        tests can substitute fakes. Recall is not configured until a pipeline
+        is injected; calling recall without one is a contract violation.
+        """
+        if self.recall_pipeline is None:
+            raise RecallContractViolation("recall pipeline is not configured")
+        return self.recall_pipeline.run(request)
 
     def list_memories(
         self,

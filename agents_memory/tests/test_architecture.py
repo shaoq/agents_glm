@@ -67,3 +67,25 @@ def test_readability_modules_add_no_runtime_dependencies() -> None:
             if isinstance(node, ast.ImportFrom) and node.module
         }
         assert imports <= allowed_roots, relative_path
+
+
+def test_recall_integration_does_not_reference_sibling_projects() -> None:
+    """Recall domain, pipeline, Service, Settings and CLI stay within agents_memory.
+
+    Rejects any import, env read, db path or Chroma collection that would couple
+    Recall to a sibling sub-project (e.g. ``agents_rag``).
+    """
+    source_root = Path(__file__).parents[1] / "src" / "agents_memory"
+    targets = list((source_root / "recall").rglob("*.py"))
+    targets.extend(
+        [
+            source_root / "pipeline" / "recall.py",
+            source_root / "cli.py",
+            source_root / "service.py",
+            source_root / "config.py",
+        ]
+    )
+    forbidden = ("agents_rag", "agents_memory_rag", "../agents_")
+    for path in targets:
+        content = path.read_text(encoding="utf-8")
+        assert not any(name in content for name in forbidden), path

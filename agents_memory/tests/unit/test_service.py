@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from agents_memory.models import (
     CandidateMemory,
     MemoryRecord,
@@ -10,6 +12,14 @@ from agents_memory.models import (
     RelationKind,
     SourceKind,
 )
+from agents_memory.recall import (
+    ExecutionStatus,
+    RecallMetadata,
+    RecallRequest,
+    RecallResult,
+    Sufficiency,
+)
+from agents_memory.recall.errors import RecallContractViolation, RecallStorageUnavailable
 from agents_memory.service import MemoryService
 from agents_memory.storage.repository import MemoryRepository
 
@@ -88,3 +98,68 @@ def test_service_observes_and_sweeps_pending_by_exact_scope(
         == []
     )
     assert service.sweep_pending_resolutions(now=now) == 1
+
+
+class _FakeRecallPipeline:
+    """Minimal Recall pipeline stub: records the request, returns a canned result."""
+
+    def __init__(self, result: RecallResult | None = None, raises: Exception | None = None) -> None:
+        self._result = result
+        self._raises = raises
+        self.calls: list[RecallRequest] = []
+
+    def run(self, request: RecallRequest) -> RecallResult:
+        self.calls.append(request)
+        if self._raises is not None:
+            raise self._raises
+        assert self._result is not None
+        return self._result
+
+
+def _recall_request(**overrides: object) -> RecallRequest:
+    base: dict[str, object] = {"user_id": "u1", "query": "用户偏好什么语言"}
+    base.update(overrides)
+    return RecallRequest(**base)  # type: ignore[arg-type]
+
+
+def _recall_result(context: str = "用户偏好 Python") -> RecallResult:
+    return RecallResult(
+        context=context,
+        evidence=(),
+        metadata=RecallMetadata(
+            sufficiency=Sufficiency.SUFFICIENT,
+            execution_status=ExecutionStatus.COMPLETE,
+        ),
+    )
+
+
+def test_recall_runs_injected_pipeline_and_returns_structured_result(
+    tmp_path: Path,
+) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    expected = _recall_result()
+    pipeline = _FakeRecallPipeline(result=expected)
+    service = MemoryService(repository, recall_pipeline=pipeline)
+    request = _recall_request()
+
+    result = service.recall(request)
+
+    assert result is expected
+    assert pipeline.calls == [request]
+
+
+def test_recall_propagates_fatal_domain_errors(tmp_path: Path) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    pipeline = _FakeRecallPipeline(raises=RecallStorageUnavailable("sqlite down"))
+    service = MemoryService(repository, recall_pipeline=pipeline)
+
+    with pytest.raises(RecallStorageUnavailable):
+        service.recall(_recall_request())
+
+
+def test_recall_without_pipeline_raises_not_configured(tmp_path: Path) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    service = MemoryService(repository)
+
+    with pytest.raises(RecallContractViolation, match="not configured"):
+        service.recall(_recall_request())

@@ -123,6 +123,53 @@ agents-memory sync rebuild
 若 SQLite 提交后 Chroma 暂时不可用，写入报告返回 `retryable`，事实不会丢失。默认查询结果
 还会回 SQLite 校验，因此脏向量不会被当成当前事实。
 
+## 召回（Recall）
+
+显式触发的只读取回管线：按当前查询、用户作用域和预算，从已有记忆中组装可追溯、低冗余的上下文。
+Recall 不写入、不修改索引状态、不创建待处理项；首期由调用方决定何时召回。
+
+```text
+RecallRequest → 意图 → 分层规划/检索 → 资格过滤 → 效用评分
+    → 证据解析（时序/关系/冲突）→ 集合选择 → 上下文组装 → RecallResult
+```
+
+- 同一 `user_id` 内三层候选通道：当前会话、Agent 历史、用户共享；调用方可关闭较宽通道；
+- SQLite 是真相源，Chroma 只产候选；候选回查 SQLite 后才进入评分；
+- 硬过滤（用户/授权/有效性/显式时间与类型）不可被高分或 LLM 覆盖；
+- 评分分语义、任务贡献、时间、作用域、可信度、命中稳健性与有界 importance，LLM 只复核前部候选；
+- 证据优先用持久 `SUPERSEDES`/`CORRECTS` 关系与结构化时间；关键冲突保留双方；
+- 充分性 `SUFFICIENT/PARTIAL/CONFLICTED/EMPTY` 与执行状态 `COMPLETE/DEGRADED` 分离。
+
+### 召回命令
+
+```bash
+# 人类可读输出
+agents-memory recall "用户偏好什么语言" --user-id user-1 \
+  --agent-id assistant-1 --session-id session-9
+
+# JSON 输出（含 evidence / context / metadata）
+agents-memory recall "上个月去过哪里" --user-id user-1 --json-output
+
+# 时序视角 + 时间区间
+agents-memory recall "一月时的地址" --user-id user-1 \
+  --temporal interval --time-start 2026-01-01T00:00:00 --time-end 2026-06-01T00:00:00
+
+# 限制类型、证据数与 token 预算
+agents-memory recall "项目进度" --user-id user-1 --type fact \
+  --max-evidence 5 --max-tokens 2000
+
+# 诊断输出（降级码与诊断说明）
+agents-memory recall "..." --user-id user-1 --diagnostic
+```
+
+未配置 `LLM_API_KEY` 时既有写入与维护命令照常可用；只有调用 `recall` 才返回未配置错误。
+
+### 召回配置
+
+Recall 默认使用 `MEMORY_RECALL_MODEL`（默认 `glm-4.7-flash`）。通道候选额度、全局候选上限、
+LLM 批量复核上限、默认证据数（≤50）与 token 预算（≤8000）均可通过 `.env` 调整，详见 `.env.example`
+中 `RECALL_*` 与 `MEMORY_RECALL_MODEL` 配置项。Recall 配置只在构建召回运行时时校验。
+
 ## 作用域与来源
 
 - `user_id` 必填，是强制隐私边界；

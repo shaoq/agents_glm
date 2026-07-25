@@ -38,7 +38,6 @@ from agents_memory.recall.models import (
     RecallResult,
     RejectedCandidate,
     RejectionReason,
-    RetrievedCandidate,
     ScoreComponent,
     ScoredCandidate,
     Sufficiency,
@@ -413,7 +412,6 @@ class TestRecallFieldsDoNotMutateMemoryRecord:
     """Temporary Recall fields live on stage wrappers, never on MemoryRecord."""
 
     def test_memory_record_schema_excludes_recall_fields(self):
-        record = _record()
         recall_fields = {
             "utility",
             "provisional_role",

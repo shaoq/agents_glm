@@ -11,6 +11,16 @@ from agents_memory.models import (
     WriteReport,
     WriteStatus,
 )
+from agents_memory.recall import (
+    ExecutionStatus,
+    RecallMetadata,
+    RecallResult,
+    Sufficiency,
+    TemporalIntent,
+)
+from agents_memory.recall.errors import RecallStorageUnavailable
+from agents_memory.service import MemoryService
+from agents_memory.storage.repository import MemoryRepository
 
 
 class StubPipeline:
@@ -144,3 +154,169 @@ def test_cli_pending_list_and_sweep() -> None:
     assert json.loads(listed.stdout) == []
     assert swept.exit_code == 0
     assert "2" in swept.stdout
+
+
+# === recall command ===
+
+
+class _RecordingRecallPipeline:
+    """Records the RecallRequest and returns a canned RecallResult (or raises)."""
+
+    def __init__(
+        self,
+        result: RecallResult | None = None,
+        raises: Exception | None = None,
+    ) -> None:
+        self._result = result
+        self._raises = raises
+        self.calls: list = []
+
+    def run(self, request):  # type: ignore[no-untyped-def]
+        self.calls.append(request)
+        if self._raises is not None:
+            raise self._raises
+        assert self._result is not None
+        return self._result
+
+
+def _canned_recall_result(
+    context: str = "用户偏好 Python",
+    diagnostics: tuple[str, ...] = (),
+) -> RecallResult:
+    return RecallResult(
+        context=context,
+        evidence=(),
+        metadata=RecallMetadata(
+            sufficiency=Sufficiency.SUFFICIENT,
+            execution_status=ExecutionStatus.COMPLETE,
+            diagnostics=diagnostics,
+        ),
+    )
+
+
+def _recall_app(tmp_path: Path, pipeline: _RecordingRecallPipeline):
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    service = MemoryService(repository, recall_pipeline=pipeline)
+    return create_app(service=service)
+
+
+def test_cli_recall_human_readable(tmp_path: Path) -> None:
+    app = _recall_app(
+        tmp_path, _RecordingRecallPipeline(result=_canned_recall_result())
+    )
+    result = CliRunner().invoke(app, ["recall", "--user-id", "u1", "用户偏好"])
+
+    assert result.exit_code == 0
+    assert "用户偏好 Python" in result.stdout
+
+
+def test_cli_recall_json_output(tmp_path: Path) -> None:
+    app = _recall_app(
+        tmp_path, _RecordingRecallPipeline(result=_canned_recall_result())
+    )
+    result = CliRunner().invoke(
+        app, ["recall", "--user-id", "u1", "q", "--json-output"]
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["context"] == "用户偏好 Python"
+    assert payload["metadata"]["sufficiency"] == "sufficient"
+
+
+def test_cli_recall_diagnostic_output(tmp_path: Path) -> None:
+    pipeline = _RecordingRecallPipeline(
+        result=_canned_recall_result(diagnostics=("intent_fallback",))
+    )
+    app = _recall_app(tmp_path, pipeline)
+    result = CliRunner().invoke(
+        app, ["recall", "--user-id", "u1", "q", "--diagnostic"]
+    )
+
+    assert result.exit_code == 0
+    assert pipeline.calls[0].diagnostic is True
+    assert "intent_fallback" in result.stdout
+
+
+def test_cli_recall_maps_scope_type_and_budget(tmp_path: Path) -> None:
+    pipeline = _RecordingRecallPipeline(result=_canned_recall_result())
+    app = _recall_app(tmp_path, pipeline)
+    CliRunner().invoke(
+        app,
+        [
+            "recall",
+            "--user-id",
+            "u1",
+            "--agent-id",
+            "a1",
+            "--session-id",
+            "s1",
+            "--type",
+            "fact",
+            "--max-evidence",
+            "5",
+            "--max-tokens",
+            "500",
+            "查询",
+        ],
+    )
+
+    request = pipeline.calls[0]
+    assert request.user_id == "u1"
+    assert request.agent_id == "a1"
+    assert request.session_id == "s1"
+    assert MemoryType.FACT in request.explicit_types
+    assert request.max_evidence_items == 5
+    assert request.max_context_tokens == 500
+
+
+def test_cli_recall_maps_temporal_arguments(tmp_path: Path) -> None:
+    pipeline = _RecordingRecallPipeline(result=_canned_recall_result())
+    app = _recall_app(tmp_path, pipeline)
+    CliRunner().invoke(
+        app,
+        [
+            "recall",
+            "--user-id",
+            "u1",
+            "--temporal",
+            "interval",
+            "--time-start",
+            "2026-01-01T00:00:00",
+            "--time-end",
+            "2026-06-01T00:00:00",
+            "查询",
+        ],
+    )
+
+    request = pipeline.calls[0]
+    assert request.temporal_intent == TemporalIntent.INTERVAL
+    assert request.explicit_time_range is not None
+    assert request.explicit_time_range.start.year == 2026
+    assert request.explicit_time_range.end.year == 2026
+
+
+def test_cli_recall_reports_not_configured(tmp_path: Path) -> None:
+    repository = MemoryRepository(tmp_path / "memory.sqlite")
+    app = create_app(service=MemoryService(repository))
+    result = CliRunner().invoke(app, ["recall", "--user-id", "u1", "q"])
+
+    assert result.exit_code != 0
+    assert "not configured" in result.output
+
+
+def test_cli_recall_reports_domain_failure(tmp_path: Path) -> None:
+    pipeline = _RecordingRecallPipeline(
+        raises=RecallStorageUnavailable("sqlite down")
+    )
+    app = _recall_app(tmp_path, pipeline)
+    result = CliRunner().invoke(app, ["recall", "--user-id", "u1", "q"])
+
+    assert result.exit_code == 1
+
+
+def test_cli_help_lists_recall_command() -> None:
+    result = CliRunner().invoke(create_app(StubPipeline(), StubService()), ["--help"])
+
+    assert result.exit_code == 0
+    assert "recall" in result.stdout

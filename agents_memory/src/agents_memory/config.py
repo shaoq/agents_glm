@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     pending_high_ttl_days: int = Field(default=30, gt=0)
     pending_normal_ttl_days: int = Field(default=7, gt=0)
     pending_low_ttl_days: int = Field(default=1, gt=0)
+    # --- Recall configuration (lazy-validated; call validate_recall()) ---
+    memory_recall_model: str = "glm-4.7-flash"
+    recall_session_quota: int = Field(default=10, ge=1)
+    recall_agent_history_quota: int = Field(default=10, ge=1)
+    recall_user_shared_quota: int = Field(default=10, ge=1)
+    recall_global_candidate_limit: int = Field(default=30, ge=1)
+    recall_llm_review_top_n: int = Field(default=10, ge=0)
+    recall_default_max_evidence_items: int = Field(default=10, ge=1, le=50)
+    recall_default_max_context_tokens: int = Field(default=2000, ge=1, le=8000)
     memory_storage_dir: Path = Path("storage")
 
     @property
@@ -33,3 +42,7 @@ class Settings(BaseSettings):
     def validate_write(self) -> None:
         if not self.llm_api_key:
             raise ValueError("LLM_API_KEY is required for write operations")
+
+    def validate_recall(self) -> None:
+        if not self.llm_api_key:
+            raise ValueError("LLM_API_KEY is required for recall operations")
