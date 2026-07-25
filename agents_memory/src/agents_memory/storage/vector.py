@@ -4,7 +4,12 @@ from typing import Protocol
 import chromadb
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents_memory.models import MemoryRecord, MemoryScope, MemoryType
+from agents_memory.models import (
+    MemoryRecord,
+    MemoryScope,
+    MemoryType,
+    Validity,
+)
 
 
 class IndexModelMismatch(ValueError):
@@ -33,6 +38,19 @@ class MemoryIndex(Protocol):
         type: MemoryType,
         top_k: int,
         threshold: float,
+    ) -> list[IndexHit]: ...
+
+    def query_candidates(
+        self,
+        embedding: list[float],
+        *,
+        user_id: str,
+        types: tuple[MemoryType, ...],
+        top_k: int,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        validities: tuple[Validity, ...] = (Validity.ACTIVE,),
+        threshold: float = 0.0,
     ) -> list[IndexHit]: ...
 
 
@@ -107,6 +125,42 @@ class ChromaMemoryIndex:
                     {"validity": {"$eq": "active"}},
                 ]
             },
+            include=["distances"],
+        )
+        ids = result["ids"][0] if result["ids"] else []
+        distances = result["distances"][0] if result["distances"] else []
+        hits = []
+        for memory_id, distance in zip(ids, distances, strict=True):
+            similarity = max(0.0, min(1.0, 1.0 - float(distance)))
+            if similarity >= threshold:
+                hits.append(IndexHit(memory_id=memory_id, similarity=similarity))
+        return hits
+
+    def query_candidates(
+        self,
+        embedding: list[float],
+        *,
+        user_id: str,
+        types: tuple[MemoryType, ...],
+        top_k: int,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        validities: tuple[Validity, ...] = (Validity.ACTIVE,),
+        threshold: float = 0.0,
+    ) -> list[IndexHit]:
+        clauses: list[dict[str, object]] = [
+            {"user_id": {"$eq": user_id}},
+            {"type": {"$in": [t.value for t in types]}},
+            {"validity": {"$in": [v.value for v in validities]}},
+        ]
+        if agent_id is not None:
+            clauses.append({"agent_id": {"$eq": agent_id}})
+        if session_id is not None:
+            clauses.append({"session_id": {"$eq": session_id}})
+        result = self.collection.query(
+            query_embeddings=[embedding],
+            n_results=top_k,
+            where={"$and": clauses},
             include=["distances"],
         )
         ids = result["ids"][0] if result["ids"] else []

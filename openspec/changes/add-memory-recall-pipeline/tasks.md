@@ -10,16 +10,16 @@
 ## 2. Additive storage and index reads
 
 - [ ] 2.1 Run GitNexus upstream impact analysis for `MemoryRepository`, report the blast radius, and stop for user direction if risk is HIGH or CRITICAL
-- [ ] 2.2 Add failing Repository tests for bounded batch loading and user/agent/session/type scoped reads
-- [ ] 2.3 Implement additive bounded batch and hierarchical read methods without changing existing Repository method semantics
-- [ ] 2.4 Add failing Repository tests for temporal queries, eligible historical versions, and relation batch reads
-- [ ] 2.5 Implement bounded temporal, historical, and relation read methods with mandatory `user_id` constraints
-- [ ] 2.6 Add failing Repository tests for bounded unsynced-record reads and final state/version revalidation
-- [ ] 2.7 Implement unsynced coverage reads and final revalidation reads without write-side effects
-- [ ] 2.8 Run GitNexus upstream impact analysis for the existing memory index query symbols, report the blast radius, and stop for user direction if risk is HIGH or CRITICAL
-- [ ] 2.9 Add failing vector adapter tests for Recall queries with required user and optional agent/session/type filters
-- [ ] 2.10 Add the Recall-specific `query_candidates(...)` contract and Chroma implementation while preserving existing Write `query(...)`
-- [ ] 2.11 Run the existing Repository, vector, lookup, coordinator, write-pipeline, sync, and maintenance regression tests
+- [x] 2.2 Add failing Repository tests for bounded batch loading and user/agent/session/type scoped reads
+- [x] 2.3 Implement additive bounded batch and hierarchical read methods without changing existing Repository method semantics
+- [x] 2.4 Add failing Repository tests for temporal queries, eligible historical versions, and relation batch reads
+- [x] 2.5 Implement bounded temporal, historical, and relation read methods with mandatory `user_id` constraints
+- [x] 2.6 Add failing Repository tests for bounded unsynced-record reads and final state/version revalidation
+- [x] 2.7 Implement unsynced coverage reads and final revalidation reads without write-side effects
+- [x] 2.8 Run GitNexus upstream impact analysis for the existing memory index query symbols, report the blast radius, and stop for user direction if risk is HIGH or CRITICAL
+- [x] 2.9 Add failing vector adapter tests for Recall queries with required user and optional agent/session/type filters
+- [x] 2.10 Add the Recall-specific `query_candidates(...)` contract and Chroma implementation while preserving existing Write `query(...)`
+- [x] 2.11 Run the existing Repository, vector, lookup, coordinator, write-pipeline, sync, and maintenance regression tests
 
 ## 3. Intent construction and deterministic planning
 
