@@ -8,7 +8,7 @@
 >
 > **深入进度**：⏳ 大纲，随讨论逐环节深入
 >
-> **更新日期**：2026-07-24
+> **更新日期**：2026-07-25
 
 ---
 
@@ -49,7 +49,9 @@
 
 ## 3. 反思（Reflection）⭐⭐
 
-> ⏳ 待深入
+> Reflection 已拆分为独立知识主题，详见 [记忆反思管线（Memory Reflection Pipeline）](./memory-reflection-pipeline.md)。
+>
+> 本节仅保留它在 Maintenance 中的职责边界；触发、证据选择、综合验证、来源追踪、写回及生命周期等知识点在独立文档中深入。
 
 - **触发**：近期记忆 importance 累积超阈值（Stanford Generative Agents 模式）
 - **提问**：LLM 针对近期记忆生成反思问题（「用户最近在关注什么？」）
