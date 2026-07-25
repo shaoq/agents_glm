@@ -152,3 +152,75 @@ class TestCrossUserRelationRejection:
         assert len(groups) == 1
         assert groups[0].primary.memory_id == "mine"
         assert groups[0].historical == ()
+
+
+class _FakeReviewer:
+    def __init__(self, groups=(), *, fail: bool = False) -> None:
+        self._groups = groups
+        self._fail = fail
+
+    def review(self, request, candidates, diag):  # noqa: ARG002
+        from agents_memory.recall.models import DegradationCode
+
+        if self._fail:
+            diag.degrade(DegradationCode.RESOLUTION_FALLBACK, "fake failure")
+            return []
+        return list(self._groups)
+
+
+def _resolver_with_reviewer(repo, reviewer) -> EvidenceResolver:
+    return EvidenceResolver(RecallReadRepository(repo.path), reviewer=reviewer)
+
+
+class TestEventIdentityAndConflict:
+    def test_conflict_group_keeps_both_sides(self, repo):
+        a = _scored("a", utility=0.9)
+        b = _scored("b", utility=0.7)
+        reviewer = _FakeReviewer([(("a", "b"), "same_event", True)])
+        groups = _resolve(_resolver_with_reviewer(repo, reviewer), a, b)
+        assert len(groups) == 1
+        group = groups[0]
+        assert group.primary.role is EvidenceRole.CONFLICTING
+        ids = {group.primary.memory_id, *(c.memory_id for c in group.conflicting)}
+        assert ids == {"a", "b"}
+
+    def test_same_event_no_conflict_becomes_evolution(self, repo):
+        a = _scored("a", utility=0.9)
+        b = _scored("b", utility=0.7)
+        reviewer = _FakeReviewer([(("a", "b"), "same_event", False)])
+        groups = _resolve(_resolver_with_reviewer(repo, reviewer), a, b)
+        assert len(groups) == 1
+        assert groups[0].primary.role is EvidenceRole.CURRENT
+        assert {h.role for h in groups[0].historical} == {EvidenceRole.EVOLVED}
+
+    def test_unknown_identity_stays_independent(self, repo):
+        a = _scored("a")
+        b = _scored("b")
+        reviewer = _FakeReviewer([(("a", "b"), "unknown", False)])
+        groups = _resolve(_resolver_with_reviewer(repo, reviewer), a, b)
+        assert len(groups) == 2
+
+    def test_different_event_stays_independent(self, repo):
+        a = _scored("a")
+        b = _scored("b")
+        reviewer = _FakeReviewer([(("a", "b"), "different_event", False)])
+        groups = _resolve(_resolver_with_reviewer(repo, reviewer), a, b)
+        assert len(groups) == 2
+
+    def test_reviewer_failure_falls_back_to_independent(self, repo):
+        from agents_memory.recall.diagnostics import RecallDiagnostics
+        from agents_memory.recall.models import DegradationCode, RecallRequest
+
+        a = _scored("a")
+        b = _scored("b")
+        reviewer = _FakeReviewer(fail=True)
+        resolver = _resolver_with_reviewer(repo, reviewer)
+        request = RecallRequest(user_id="u1", agent_id="a1", session_id="s1", query="q")
+        diag = RecallDiagnostics()
+        groups = resolver.resolve(request, (a, b), diag)
+        assert len(groups) == 2
+        assert DegradationCode.RESOLUTION_FALLBACK in diag.degradations
+
+    def test_no_reviewer_keeps_all_independent(self, resolver):
+        groups = _resolve(resolver, _scored("a"), _scored("b"))
+        assert len(groups) == 2

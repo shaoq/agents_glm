@@ -56,11 +56,11 @@
 - [x] 6.2 Implement deterministic temporal-view resolution using event time, validity time, and explicit query intent
 - [x] 6.3 Add failing tests for `SUPERSEDES` and `CORRECTS` chains, missing nodes, self-links, cycles, and cross-user relation rejection
 - [x] 6.4 Implement bounded explicit-relation resolution and evidence roles without mutating stored validity or relations
-- [ ] 6.5 Add failing tests for same-event strong anchors, clearly separate events, and `UNKNOWN_EVENT_IDENTITY`
-- [ ] 6.6 Implement candidate bucketing and bounded same-event semantic review
-- [ ] 6.7 Add failing tests for natural evolution, resolvable correction, unresolved fact conflict, and unknown-identity plus contradictory content
-- [ ] 6.8 Implement conservative evidence grouping that keeps key conflict sides together, does not create DEFER, and never asks the user for clarification
-- [ ] 6.9 Add failing tests for LLM relation-review failure and implement explicit-relation/time-only resolution fallback
+- [x] 6.5 Add failing tests for same-event strong anchors, clearly separate events, and `UNKNOWN_EVENT_IDENTITY`
+- [x] 6.6 Implement candidate bucketing and bounded same-event semantic review
+- [x] 6.7 Add failing tests for natural evolution, resolvable correction, unresolved fact conflict, and unknown-identity plus contradictory content
+- [x] 6.8 Implement conservative evidence grouping that keeps key conflict sides together, does not create DEFER, and never asks the user for clarification
+- [x] 6.9 Add failing tests for LLM relation-review failure and implement explicit-relation/time-only resolution fallback
 
 ## 7. Set selection and context assembly
 
