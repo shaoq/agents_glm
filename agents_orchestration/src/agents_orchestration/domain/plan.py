@@ -1,0 +1,155 @@
+"""Dynamic PlanGraph and Task specifications (design Decision 3/8/10).
+
+The Planner emits a PlanGraph Proposal; the deterministic PlanValidator (task 5.5)
+checks DAG, registry, permissions, budget, depth, concurrency and deliverables
+before acceptance. This module holds the immutable structure plus the cheap
+graph invariants used by validation; full validation is wired up in Section 5.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from agents_orchestration.domain.enums import BranchRole, CapabilityKind, WorkerRole
+from agents_orchestration.domain.ids import PlanId, TaskId
+
+
+class DependencyKind(StrEnum):
+    """Edge kind in the PlanGraph."""
+
+    DATA = "data"
+    CONTROL = "control"
+
+
+class Dependency(BaseModel):
+    """A directed edge ``predecessor -> successor``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    predecessor: TaskId
+    successor: TaskId
+    kind: DependencyKind = DependencyKind.DATA
+
+
+class PlanAcceptance(StrEnum):
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
+class TaskSpec(BaseModel):
+    """An LLM-proposed task within a PlanGraph (design Decision 3).
+
+    Identifiers are stable: Retry does not change ``task_id``; Replan preserves
+    unaffected TaskSpecs verbatim and supersedes only invalidated ones.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: TaskId
+    worker_role: WorkerRole
+    description: str
+    required_capabilities: tuple[CapabilityKind, ...] = Field(default_factory=tuple)
+    branch_role: BranchRole | None = None
+    deliverable_path: str | None = None
+    depth: int = Field(default=1, ge=1)
+    depends_on: tuple[TaskId, ...] = Field(default_factory=tuple)
+    prompt_hint: str | None = None
+
+    @property
+    def is_research(self) -> bool:
+        return self.worker_role is WorkerRole.EVIDENCE_RESEARCHER
+
+
+class PlanGraph(BaseModel):
+    """An immutable, versioned dynamic plan (design Decision 3/8)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    plan_id: PlanId
+    version: int = Field(default=1, ge=1)
+    task_specs: tuple[TaskSpec, ...] = Field(default_factory=tuple)
+    dependencies: tuple[Dependency, ...] = Field(default_factory=tuple)
+    deliverable_paths: tuple[str, ...] = Field(default_factory=tuple)
+
+    @property
+    def task_ids(self) -> tuple[TaskId, ...]:
+        return tuple(spec.task_id for spec in self.task_specs)
+
+    @property
+    def task_count(self) -> int:
+        return len(self.task_specs)
+
+    @property
+    def max_depth(self) -> int:
+        return max((spec.depth for spec in self.task_specs), default=0)
+
+    def spec(self, task_id: TaskId) -> TaskSpec | None:
+        return next((s for s in self.task_specs if s.task_id == task_id), None)
+
+    def successors(self, task_id: TaskId) -> tuple[TaskId, ...]:
+        return tuple(dep.successor for dep in self.dependencies if dep.predecessor == task_id)
+
+    def predecessors(self, task_id: TaskId) -> tuple[TaskId, ...]:
+        return tuple(dep.predecessor for dep in self.dependencies if dep.successor == task_id)
+
+    def has_cycle(self) -> bool:
+        """Cheap cycle detection via DFS coloring (full validation in 5.5)."""
+
+        graph: dict[str, list[str]] = {tid: [] for tid in self.task_ids}
+        for dep in self.dependencies:
+            if dep.predecessor in graph and dep.successor in graph:
+                graph[dep.predecessor].append(dep.successor)
+
+        color = {tid: 0 for tid in self.task_ids}  # 0=white,1=gray,2=black
+
+        def visit(node: str) -> bool:
+            color[node] = 1
+            for nxt in graph[node]:
+                if color[nxt] == 1:
+                    return True
+                if color[nxt] == 0 and visit(nxt):
+                    return True
+            color[node] = 2
+            return False
+
+        return any(color[n] == 0 and visit(n) for n in self.task_ids)
+
+
+class Plan(BaseModel):
+    """Stored Plan record: a PlanGraph plus acceptance metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    run_id: str
+    graph: PlanGraph
+    acceptance: PlanAcceptance = PlanAcceptance.PROPOSED
+    proposed_at: datetime
+    accepted_at: datetime | None = None
+    rejected_diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+    superseded_by: int | None = None
+
+    @property
+    def version(self) -> int:
+        return self.graph.version
+
+    def accept(self, at: datetime) -> Plan:
+        return self.model_copy(update={"acceptance": PlanAcceptance.ACCEPTED, "accepted_at": at})
+
+    def reject(self, diagnostics: tuple[str, ...], at: datetime) -> Plan:
+        return self.model_copy(
+            update={
+                "acceptance": PlanAcceptance.REJECTED,
+                "rejected_diagnostics": diagnostics,
+                "accepted_at": at,
+            }
+        )
+
+    def supersede(self, by_version: int) -> Plan:
+        return self.model_copy(
+            update={"acceptance": PlanAcceptance.SUPERSEDED, "superseded_by": by_version}
+        )

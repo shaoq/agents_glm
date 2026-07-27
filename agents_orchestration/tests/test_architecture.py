@@ -70,6 +70,7 @@ def test_domain_imports_only_pure_dependencies() -> None:
     allowed = {
         "agents_orchestration",
         "pydantic",
+        "__future__",
         "datetime",
         "uuid",
         "enum",
@@ -81,6 +82,7 @@ def test_domain_imports_only_pure_dependencies() -> None:
         "itertools",
         "decimal",
         "math",
+        "hashlib",
         "json",
         "time",
     }

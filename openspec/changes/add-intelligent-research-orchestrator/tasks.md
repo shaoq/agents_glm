@@ -9,15 +9,15 @@
 
 ## 2. Domain Models and State Machines
 
-- [ ] 2.1 Add immutable identifiers and models for Run, Task, Attempt, Operation, Plan Version, State Version, Lease Epoch, Gate, Event, Checkpoint, and ArtifactRef
-- [ ] 2.2 Add GoalSpec, CompletionContract, CompletionCriterion, RunPolicy, Budget, PlanGraph, TaskSpec, and Dependency models
-- [ ] 2.3 Add WorkerDefinition, CapabilityDescriptor, CapabilityRequest, CapabilityResult, Evidence, EvidenceSet, and TaskResult models
-- [ ] 2.4 Add typed Run, Task, Attempt, Gate, Completion, Termination, Effect, and Failure enums
-- [ ] 2.5 Implement and unit-test Run state transition validation
-- [ ] 2.6 Implement and unit-test Task state transition validation
-- [ ] 2.7 Implement and unit-test Attempt result acceptance states
-- [ ] 2.8 Implement and unit-test Gate state transitions and single-use consumption state
-- [ ] 2.9 Add Domain Event models for every formal transition used by Runtime and control surfaces
+- [x] 2.1 Add immutable identifiers and models for Run, Task, Attempt, Operation, Plan Version, State Version, Lease Epoch, Gate, Event, Checkpoint, and ArtifactRef
+- [x] 2.2 Add GoalSpec, CompletionContract, CompletionCriterion, RunPolicy, Budget, PlanGraph, TaskSpec, and Dependency models
+- [x] 2.3 Add WorkerDefinition, CapabilityDescriptor, CapabilityRequest, CapabilityResult, Evidence, EvidenceSet, and TaskResult models
+- [x] 2.4 Add typed Run, Task, Attempt, Gate, Completion, Termination, Effect, and Failure enums
+- [x] 2.5 Implement and unit-test Run state transition validation
+- [x] 2.6 Implement and unit-test Task state transition validation
+- [x] 2.7 Implement and unit-test Attempt result acceptance states
+- [x] 2.8 Implement and unit-test Gate state transitions and single-use consumption state
+- [x] 2.9 Add Domain Event models for every formal transition used by Runtime and control surfaces
 
 ## 3. Persistence and Artifact Infrastructure
 
