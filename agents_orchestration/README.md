@@ -34,22 +34,97 @@ cp .env.example .env  # 按需调整
 
 ## 默认离线测试
 
-默认测试套件**不调用真实网络**，全部使用确定性 Fake Adapter。真实 Adapter 的 Smoke 测试需显式启用。
+默认测试套件**不调用真实网络**，全部使用确定性 Fake Adapter（架构测试保证 Fake 不 import
+httpx/openai/requests）。真实 Adapter 的 Smoke 测试需显式启用（`ORCH_LIVE_SMOKE=1`）。
 
 ```bash
-pytest            # 默认：unit + integration + architecture + contract + e2e
-pytest -m unit    # 仅单元测试
+pytest                       # 全量（unit + integration + architecture + contract + e2e）
+pytest -m unit               # 仅单元
+pytest -m e2e                # 仅端到端
+pytest --cov=agents_orchestration --cov-report=term-missing   # 覆盖率（首期阈值 80%）
 ```
 
-## CLI 概览
+## CLI
 
-```text
-run start/show/watch/pause/resume/cancel
-gate list/respond
-artifact list/export
-capability list/doctor
-runtime tick RUN_ID | watch [--run RUN_ID]
+```bash
+agents-orchestration --version
+
+# Run 生命周期
+agents-orchestration run start --goal "总结 X 并产出报告" --request-id req-1 [--create-only] [--follow]
+agents-orchestration run show RUN_ID
+agents-orchestration run watch RUN_ID
+agents-orchestration run pause RUN_ID --expected-version N
+agents-orchestration run resume RUN_ID --expected-version N --target researching
+agents-orchestration run cancel RUN_ID --expected-version N
+
+# Human Gate
+agents-orchestration gate list RUN_ID
+agents-orchestration gate respond GATE_ID --request-id rq --actor user --role approver --payload '{"ok":true}'
+
+# Artifact（内容寻址、hash 校验）
+agents-orchestration artifact list
+agents-orchestration artifact export ARTIFACT_ID
+
+# Capability（secret-safe 诊断）
+agents-orchestration capability list
+agents-orchestration capability doctor
+
+# Durable Runtime（运维）
+agents-orchestration runtime tick RUN_ID          # 必须指定 Run；不改 Pause/Gate/Cancel 状态
+agents-orchestration runtime watch --run RUN_ID   # 持续推进单个 Run
+agents-orchestration runtime watch                # 推进所有可恢复 Run
 ```
+
+CLI 只做参数适配与展示，全部领域逻辑在 Application Service。失败映射为稳定退出码：
+`404` 未找到、`409` 版本冲突 / 重复请求，其余 `1`，并输出 JSON 诊断。
+
+## Python API
+
+```python
+from agents_orchestration.application.service import OrchestrationService
+from agents_orchestration.runtime.persistence.connection import SqliteBackend
+
+backend = SqliteBackend("storage/runtime.sqlite", "storage/artifacts")
+service = OrchestrationService(backend)
+
+run = service.start_run("研究 X", request_id="req-1")     # 幂等（Request ID 去重）
+await service.drive_run(run.run_id)                        # 持续推进直到终态或阻塞
+service.pause_run(run.run_id, expected_version=run.state_version)
+service.respond_gate(gate_id, request_id="rq", actor="user", role="approver", payload={})
+exported = service.export_artifact(artifact_id)            # hash 校验后返回字节
+```
+
+## Runtime 命令语义
+
+- `run start` 默认创建并持续推进 Run；`--create-only` 只创建不驱动；`--follow` 阻塞驱动到阻塞/终态。
+- `runtime tick RUN_ID` 执行**一次有界 Tick**（必须指定 Run），是可独立恢复/测试的执行单元。
+- `runtime watch` 是单进程持续循环（首期只支持一个 Watch 进程）。
+- Runtime 命令**不**改动 Pause/Gate/Cancel 状态——这些由 Run 命令或 Gate 流程显式控制，Tick 仅观察。
+
+## Gate 工作流
+
+四类 Gate（`GOAL_CLARIFICATION` / `PLAN_APPROVAL` / `CONFLICT_RESOLUTION` / `FINAL_REVIEW`）绑定
+`state_version` / `plan_version` / `artifact_hash`，响应经 Request ID 去重、**单次消费**；到期触发
+配置动作（cancel/fail/partial/default/escalate）。开 Gate 后 Run 阻塞；消费后以**新的 Attempt/Lease**
+恢复，绝不延续旧进程。
+
+## 恢复（Restart）
+
+所有正式状态在 SQLite；大型内容在不可变、内容寻址的 Artifact Store。进程崩溃后，新进程打开同一
+store，`RecoveryManager` 过期陈旧 Lease、重排就绪 Task、检查未知 Operation，Run 从最后一个语义
+Checkpoint 恢复并继续。
+
+## 交付物
+
+`report.md`（Markdown）、`report.json`（结构化）、`run-summary.json`（完成度、降级、未达标准、缺失
+来源、未决冲突、终止原因）。部分输出会显式披露降级而非伪造成功。
+
+## 配置
+
+通过环境变量 / `.env`（前缀 `ORCH_`），键集与 `.env.example` 完全对齐：存储路径、Web 开关与允许
+域名、Model profiles、系统上限（`MAX_TASKS` / `MAX_PLAN_DEPTH` / `MAX_CONCURRENCY` /
+`MAX_ATTEMPTS_PER_TASK` / `MAX_REPLANS` / `MAX_REPORT_REVISIONS` / `RUN_DEADLINE_SECONDS`）。
+Run Policy 只能在系统上限内收紧。
 
 ## 架构分层
 
@@ -58,7 +133,21 @@ CLI → Application → Domain + Runtime Ports ← Infrastructure Adapters
 ```
 
 Domain 不导入 Typer、SQLite、OpenAI SDK、`agents_memory`、`agents_rag` 或 Web Provider。
-同级子项目的公开 API 只允许在各自专用 Adapter 中导入。
+同级子项目的公开 API 只允许在各自专用 Adapter 中导入；Secret 只在 Adapter 边界读取。
+
+## 规格一致性（六大能力）
+
+实现覆盖六个能力规格：`durable-orchestration-runtime`、`dynamic-research-planning`、
+`research-capability-routing`、`human-gated-orchestration`、`analysis-report-delivery`、
+`orchestration-control-surface`。确定性核心（状态机、Plan 校验、Scheduler、Lease/Fencing、Budget、
+Gate、Completion 评估、Finalizer）均有测试覆盖；架构测试强制分层与只读边界。
+
+**首期有意延后（不阻塞，需独立 change）**：
+
+- 真实 Memory/RAG 适配器的 composition-root 接线（adapter 已就绪，接受注入的公开边界 callable）；
+- 模型型 Worker 的完整 prompt 逻辑（当前 `DefaultWorkerHandler` 走通管线，真实 prompt 待加）；
+- live Smoke 测试默认跳过（`ORCH_LIVE_SMOKE=1` 显式启用）；
+- 多 Watch 进程 / 分布式 Worker / FastAPI / Web UI / 真实写副作用 / 完整评测平台。
 
 ## 限制
 

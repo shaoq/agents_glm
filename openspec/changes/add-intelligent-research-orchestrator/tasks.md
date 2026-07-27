@@ -149,14 +149,14 @@
 
 ## 13. End-to-End Verification and Documentation
 
-- [ ] 13.1 Add Fake-based E2E test for Goal → Plan → parallel research → Join → Analyze → Write → Review → Finalize
-- [ ] 13.2 Add E2E test for GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW
-- [ ] 13.3 Add E2E test for evidence-gap Replan preserving unaffected accepted results
-- [ ] 13.4 Add E2E test for Memory, RAG, Web, and Model degradation combinations
-- [ ] 13.5 Add failure-injection tests at Plan commit, Task dispatch, Branch commit, Gate response, Replan, Artifact write, and final verification boundaries
-- [ ] 13.6 Add restart test proving a Run resumes from SQLite and Artifact state in a fresh process
-- [ ] 13.7 Add optional, explicitly enabled live Smoke Tests for Model, Memory, RAG, and Web Adapters
-- [ ] 13.8 Verify default tests make no real network calls and meet the configured coverage threshold
-- [ ] 13.9 Run Ruff, unit, contract, integration, architecture, and E2E test suites
-- [ ] 13.10 Update README with CLI examples, Python API, Runtime command semantics, Gate workflow, recovery, artifacts, configuration, and limitations
-- [ ] 13.11 Verify implementation behavior against all six capability specs and record any intentionally deferred behavior
+- [x] 13.1 Add Fake-based E2E test for Goal → Plan → parallel research → Join → Analyze → Write → Review → Finalize
+- [x] 13.2 Add E2E test for GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW
+- [x] 13.3 Add E2E test for evidence-gap Replan preserving unaffected accepted results
+- [x] 13.4 Add E2E test for Memory, RAG, Web, and Model degradation combinations
+- [x] 13.5 Add failure-injection tests at Plan commit, Task dispatch, Branch commit, Gate response, Replan, Artifact write, and final verification boundaries
+- [x] 13.6 Add restart test proving a Run resumes from SQLite and Artifact state in a fresh process
+- [x] 13.7 Add optional, explicitly enabled live Smoke Tests for Model, Memory, RAG, and Web Adapters
+- [x] 13.8 Verify default tests make no real network calls and meet the configured coverage threshold
+- [x] 13.9 Run Ruff, unit, contract, integration, architecture, and E2E test suites
+- [x] 13.10 Update README with CLI examples, Python API, Runtime command semantics, Gate workflow, recovery, artifacts, configuration, and limitations
+- [x] 13.11 Verify implementation behavior against all six capability specs and record any intentionally deferred behavior
