@@ -1,11 +1,11 @@
 ## 1. Package Scaffold and Architecture Boundaries
 
-- [ ] 1.1 Create `agents_orchestration` Python 3.12 package, Hatchling build, Typer entry point, test directories, `.env.example`, and storage/artifact ignore rules
-- [ ] 1.2 Add Pydantic, pydantic-settings, Typer, Rich, pytest, pytest-asyncio, pytest-cov, and Ruff configuration consistent with sibling projects
-- [ ] 1.3 Create Application, Domain, Orchestration, Runtime, Workers, Capabilities, and Adapters package boundaries
-- [ ] 1.4 Add architecture tests that forbid Domain/Core imports of infrastructure providers and sibling project implementations
-- [ ] 1.5 Add architecture tests that allow `agents_memory` and `agents_rag` imports only inside their dedicated Adapters
-- [ ] 1.6 Add a minimal README describing installation, first-release scope, read-only boundary, and default offline test behavior
+- [x] 1.1 Create `agents_orchestration` Python 3.12 package, Hatchling build, Typer entry point, test directories, `.env.example`, and storage/artifact ignore rules
+- [x] 1.2 Add Pydantic, pydantic-settings, Typer, Rich, pytest, pytest-asyncio, pytest-cov, and Ruff configuration consistent with sibling projects
+- [x] 1.3 Create Application, Domain, Orchestration, Runtime, Workers, Capabilities, and Adapters package boundaries
+- [x] 1.4 Add architecture tests that forbid Domain/Core imports of infrastructure providers and sibling project implementations
+- [x] 1.5 Add architecture tests that allow `agents_memory` and `agents_rag` imports only inside their dedicated Adapters
+- [x] 1.6 Add a minimal README describing installation, first-release scope, read-only boundary, and default offline test behavior
 
 ## 2. Domain Models and State Machines
 
