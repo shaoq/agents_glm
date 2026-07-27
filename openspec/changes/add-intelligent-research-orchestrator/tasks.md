@@ -122,17 +122,17 @@
 
 ## 11. Application Service and CLI
 
-- [ ] 11.1 Implement async OrchestrationService start, drive, inspect, pause, resume, cancel, Gate, Artifact, and export methods
-- [ ] 11.2 Implement idempotent StartRun Request ID behavior and stale Expected Version conflicts
-- [ ] 11.3 Implement `run start`, `run show`, `run watch`, `run pause`, `run resume`, and `run cancel`
-- [ ] 11.4 Implement `run start --create-only` and `--follow` display semantics
-- [ ] 11.5 Implement `gate list` and `gate respond`
-- [ ] 11.6 Implement `artifact list` and hash-validating `artifact export`
-- [ ] 11.7 Implement `capability list` and secret-safe `capability doctor`
-- [ ] 11.8 Implement `runtime tick RUN_ID`, `runtime watch --run RUN_ID`, and global `runtime watch`
-- [ ] 11.9 Reject `runtime tick` without a Run ID and document that Runtime commands do not alter Pause/Gate/Cancel state
-- [ ] 11.10 Map typed domain failures to stable CLI exit codes, JSON diagnostics, and human-readable Rich output
-- [ ] 11.11 Add CLI and Service unit tests proving CLI delegates to Application rather than duplicating domain logic
+- [x] 11.1 Implement async OrchestrationService start, drive, inspect, pause, resume, cancel, Gate, Artifact, and export methods
+- [x] 11.2 Implement idempotent StartRun Request ID behavior and stale Expected Version conflicts
+- [x] 11.3 Implement `run start`, `run show`, `run watch`, `run pause`, `run resume`, and `run cancel`
+- [x] 11.4 Implement `run start --create-only` and `--follow` display semantics
+- [x] 11.5 Implement `gate list` and `gate respond`
+- [x] 11.6 Implement `artifact list` and hash-validating `artifact export`
+- [x] 11.7 Implement `capability list` and secret-safe `capability doctor`
+- [x] 11.8 Implement `runtime tick RUN_ID`, `runtime watch --run RUN_ID`, and global `runtime watch`
+- [x] 11.9 Reject `runtime tick` without a Run ID and document that Runtime commands do not alter Pause/Gate/Cancel state
+- [x] 11.10 Map typed domain failures to stable CLI exit codes, JSON diagnostics, and human-readable Rich output
+- [x] 11.11 Add CLI and Service unit tests proving CLI delegates to Application rather than duplicating domain logic
 
 ## 12. Configuration, Security, and Observability
 

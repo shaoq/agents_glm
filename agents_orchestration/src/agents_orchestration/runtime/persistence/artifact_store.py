@@ -72,6 +72,16 @@ class SqliteArtifactStore:
         ).fetchone()
         return load(ArtifactRef, row["data"]) if row else None
 
+    def get_by_id(self, artifact_id: str) -> ArtifactRef | None:
+        row = self.conn.execute(
+            "SELECT data FROM artifact_metadata WHERE artifact_id = ?", (artifact_id,)
+        ).fetchone()
+        return load(ArtifactRef, row["data"]) if row else None
+
+    def list_all(self) -> list[ArtifactRef]:
+        rows = self.conn.execute("SELECT data FROM artifact_metadata")
+        return [load(ArtifactRef, row["data"]) for row in rows]
+
     def record_metadata(self, ref: ArtifactRef) -> None:
         self.conn.execute(
             "INSERT OR IGNORE INTO artifact_metadata "
