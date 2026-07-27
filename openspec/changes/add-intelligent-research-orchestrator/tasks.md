@@ -60,15 +60,15 @@
 
 ## 6. Worker and Capability Core
 
-- [ ] 6.1 Implement Worker Registry and initial ResearchPlanner, EvidenceResearcher, Analyst, ReportWriter, and ReportReviewer definitions
-- [ ] 6.2 Implement WorkerExecutor with Task-scoped Context Projection and output schema validation
-- [ ] 6.3 Ensure Worker output remains a TaskResult or Proposal and cannot directly access Runtime repositories
-- [ ] 6.4 Implement Capability Registry with descriptor version, schema, permission, timeout, cost, concurrency, Adapter, and health metadata
-- [ ] 6.5 Implement CapabilityRouter enforcement for Worker allowlist, Run Policy, system policy, data scope, availability, and budget
-- [ ] 6.6 Implement Async Capability invocation and normalized CapabilityResult/Failure mapping
+- [x] 6.1 Implement Worker Registry and initial ResearchPlanner, EvidenceResearcher, Analyst, ReportWriter, and ReportReviewer definitions
+- [x] 6.2 Implement WorkerExecutor with Task-scoped Context Projection and output schema validation
+- [x] 6.3 Ensure Worker output remains a TaskResult or Proposal and cannot directly access Runtime repositories
+- [x] 6.4 Implement Capability Registry with descriptor version, schema, permission, timeout, cost, concurrency, Adapter, and health metadata
+- [x] 6.5 Implement CapabilityRouter enforcement for Worker allowlist, Run Policy, system policy, data scope, availability, and budget
+- [x] 6.6 Implement Async Capability invocation and normalized CapabilityResult/Failure mapping
 - [ ] 6.7 Implement Model Profile routing for GoalNormalizer, Planner, Reviewer, and model-backed Workers
-- [ ] 6.8 Add contract tests shared by Fake and real Capability Adapters
-- [ ] 6.9 Add tests proving Planner and untrusted evidence cannot expand Capability permissions
+- [x] 6.8 Add contract tests shared by Fake and real Capability Adapters
+- [x] 6.9 Add tests proving Planner and untrusted evidence cannot expand Capability permissions
 
 ## 7. Research Capability Adapters
 
