@@ -66,22 +66,22 @@
 - [x] 6.4 Implement Capability Registry with descriptor version, schema, permission, timeout, cost, concurrency, Adapter, and health metadata
 - [x] 6.5 Implement CapabilityRouter enforcement for Worker allowlist, Run Policy, system policy, data scope, availability, and budget
 - [x] 6.6 Implement Async Capability invocation and normalized CapabilityResult/Failure mapping
-- [ ] 6.7 Implement Model Profile routing for GoalNormalizer, Planner, Reviewer, and model-backed Workers
+- [x] 6.7 Implement Model Profile routing for GoalNormalizer, Planner, Reviewer, and model-backed Workers
 - [x] 6.8 Add contract tests shared by Fake and real Capability Adapters
 - [x] 6.9 Add tests proving Planner and untrusted evidence cannot expand Capability permissions
 
 ## 7. Research Capability Adapters
 
-- [ ] 7.1 Implement deterministic Fake Memory, RAG, Web, and Model Adapters for default tests
-- [ ] 7.2 Implement Memory Recall Adapter using only the public `MemoryService` boundary
-- [ ] 7.3 Preserve Memory scope, evidence, sufficiency, conflict, and degradation fields in CapabilityResult
-- [ ] 7.4 Implement RAG Adapter using only the public `QueryPipeline` or service boundary
-- [ ] 7.5 Preserve RAG citations, sources, confidence/sufficiency, and degradation fields in CapabilityResult
-- [ ] 7.6 Implement policy-disabled-by-default Web Research Adapter with allowed-domain enforcement
-- [ ] 7.7 Implement OpenAI-compatible Model Adapter with named profiles, usage, timeout, retry-safe diagnostics, and secret redaction
-- [ ] 7.8 Wrap synchronous Memory/RAG calls in a bounded async bridge and test that unrelated Tasks remain concurrent
-- [ ] 7.9 Add Adapter health checks and safe diagnostics for `capability doctor`
-- [ ] 7.10 Add architecture tests proving Adapters do not read sibling databases or `.env` files
+- [x] 7.1 Implement deterministic Fake Memory, RAG, Web, and Model Adapters for default tests
+- [x] 7.2 Implement Memory Recall Adapter using only the public `MemoryService` boundary
+- [x] 7.3 Preserve Memory scope, evidence, sufficiency, conflict, and degradation fields in CapabilityResult
+- [x] 7.4 Implement RAG Adapter using only the public `QueryPipeline` or service boundary
+- [x] 7.5 Preserve RAG citations, sources, confidence/sufficiency, and degradation fields in CapabilityResult
+- [x] 7.6 Implement policy-disabled-by-default Web Research Adapter with allowed-domain enforcement
+- [x] 7.7 Implement OpenAI-compatible Model Adapter with named profiles, usage, timeout, retry-safe diagnostics, and secret redaction
+- [x] 7.8 Wrap synchronous Memory/RAG calls in a bounded async bridge and test that unrelated Tasks remain concurrent
+- [x] 7.9 Add Adapter health checks and safe diagnostics for `capability doctor`
+- [x] 7.10 Add architecture tests proving Adapters do not read sibling databases or `.env` files
 
 ## 8. Parallel Research and Evidence Join
 

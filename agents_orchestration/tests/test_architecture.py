@@ -109,6 +109,19 @@ def test_provider_sdks_only_in_adapters() -> None:
         _forbid(path, _import_roots(path), PROVIDERS, "provider outside adapters")
 
 
+def test_adapters_do_not_read_sibling_storage_or_env_files() -> None:
+    """Adapters never open sibling databases or ``.env`` directly (task 7.10).
+
+    Secrets arrive via Settings at the composition root; sibling public APIs are
+    the only permitted touch points. ``sqlite3`` / ``dotenv`` are forbidden here.
+    """
+
+    forbidden = {"sqlite3", "dotenv"}
+    for path in (SRC / "adapters").rglob("*.py"):
+        offenders = _import_roots(path) & forbidden
+        assert not offenders, f"{path.name}: adapter reads forbidden infra: {sorted(offenders)}"
+
+
 def test_cli_is_the_only_presentation_layer() -> None:
     """``typer`` / ``rich`` are confined to the CLI entry point."""
 
