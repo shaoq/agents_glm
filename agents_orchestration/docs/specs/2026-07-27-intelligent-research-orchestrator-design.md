@@ -1017,18 +1017,31 @@ Runtime 内部采用 Async Capability Port，以支持并行研究；现有同�
 
 默认 `Run Until Blocked`：
 
-- `run start` 创建 Run 并持续 Tick；
+- `run start` 创建 Run，并在当前进程中持续推进该 Run；
 - `--follow` 只控制是否持续展示 Event，不改变执行语义；
-- `--create-only` 只创建 `CREATED` Run，交给后续 Worker 处理；
+- `--create-only` 只创建 `CREATED` Run，交给后续 Runtime Driver 处理；
 - 到达终态或 Human Gate 后返回；
 - 进程退出不丢状态；
-- `run resume` 从正式状态继续。
+- `run resume` 提交恢复控制事件，并默认持续推进该 Run，直到再次阻塞。
 
-可选本地 Worker：
+面向开发、测试和本地运维，提供独立 Runtime Driver：
 
-- `worker --once`：处理一次 Ready Work；
-- `worker --watch`：本地轮询；
-- 首期不提供守护进程管理。
+- `runtime tick RUN_ID`：只对指定 Run 执行一个有界 Runtime Tick，然后退出；
+- `runtime watch --run RUN_ID`：持续推进指定 Run，直到终态、Gate、Pause 或进程停止；
+- `runtime watch`：轮询 SQLite 中所有可运行 Run；
+- `--poll-interval`：配置 Watch 空闲轮询间隔；
+- 首期只支持一个持续 Watch 进程，不提供守护进程管理或多实例分布式调度。
+
+```text
+run start REQUEST.json
+≈ create Run + runtime watch --run RUN_ID
+
+run start REQUEST.json --create-only
+→ 只持久化 Run，之后由 runtime tick / watch 推进
+```
+
+`run start` 和 `run resume` 是面向用户的业务命令；`runtime tick` 和 `runtime watch` 是执行控制
+命令。`--run` 只限定调度范围，不负责改变 Pause、Cancel 或 Gate 状态。
 
 ### 18.2 CLI
 
@@ -1049,8 +1062,8 @@ agents-orchestrator artifact export RUN_ID --output ./result
 agents-orchestrator capability list
 agents-orchestrator capability doctor
 
-agents-orchestrator worker --once
-agents-orchestrator worker --watch
+agents-orchestrator runtime tick RUN_ID
+agents-orchestrator runtime watch [--run RUN_ID] [--poll-interval SECONDS]
 ```
 
 CLI 只做参数适配和展示，所有行为复用 `OrchestrationService`。
