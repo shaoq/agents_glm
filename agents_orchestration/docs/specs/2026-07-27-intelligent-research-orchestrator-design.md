@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-07-27 |
-| 状态 | 架构设计已确认，待创建 OpenSpec 提案 |
+| 状态 | 架构设计已确认；OpenSpec `add-intelligent-research-orchestrator` 已创建，待实施 |
 | 子项目 | `agents_orchestration` |
 | 首期交付 | 独立 Python 包 + Python Service API + CLI |
 | 运行方式 | 本地优先、单进程执行、SQLite Durable Runtime |
@@ -24,8 +24,9 @@
 - 如何支持持久化、进程重启恢复、人工 Gate、降级和安全控制；
 - Python API、CLI、配置、错误模型和验收边界是什么。
 
-本文是架构设计，不是 OpenSpec change，也不授权直接实现。设计审阅通过后，应创建独立
-OpenSpec 提案，再进入实施计划与实现阶段。
+本文是上游架构设计，不直接授权实现。对应 OpenSpec change
+`add-intelligent-research-orchestrator` 已创建；后续应以该 change 的 specs、design 和 tasks
+作为实施依据。
 
 ---
 
