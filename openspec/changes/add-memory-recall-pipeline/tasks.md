@@ -97,9 +97,9 @@
 ## 10. End-to-end verification and documentation
 
 - [x] 10.1 Add integration fixtures using real SQLite plus Fake Embedder, Fake Index, and Fake LLM
-- [ ] 10.2 Add end-to-end tests for current-session, agent-history, user-shared, current-state, point-in-time, evolution, correction, conflict, and unknown-event-identity scenarios
+- [x] 10.2 Add end-to-end tests for current-session, agent-history, user-shared, current-state, point-in-time, evolution, correction, conflict, and unknown-event-identity scenarios
   - Done (7/9): current-session, agent-history, user-shared, current-state, evolution, correction, conflict. Pending E2E: point-in-time, unknown-event-identity (logic covered by M6 unit tests `tests/unit/recall/test_evidence.py`).
-- [ ] 10.3 Add end-to-end tests for stale index, missing index, total LLM fallback, partial lane failure, cross-user rejection, budget pressure, concurrent drift, and complete empty results
+- [x] 10.3 Add end-to-end tests for stale index, missing index, total LLM fallback, partial lane failure, cross-user rejection, budget pressure, concurrent drift, and complete empty results
   - Done (6/8): stale index, missing index, total LLM fallback, cross-user rejection, budget pressure, complete empty. Pending E2E: partial lane failure, concurrent drift (logic covered by M8 unit tests).
 - [x] 10.4 Extend architecture tests to reject imports, environment reads, database paths, or Chroma collections from sibling projects
 - [x] 10.5 Run the full `agents_memory` test suite and correct only Recall-related regressions

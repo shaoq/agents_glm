@@ -26,4 +26,4 @@
 - [x] 4.1 `cli.py` ask：条件注入 rewriter（`QueryRewriter(...) if settings.query_rewrite_enabled else None`）
 - [x] 4.2 集成测试：改写开 → 双 query 融合路径；改写关 → 原路径（行为不变）；改写失败 → 回退不崩（Fake 组件）
 - [x] 4.3 全测试 + 覆盖率 ≥ 80%（实测 118 passed，整体 90%，query_rewriter 100%）
-- [ ] 4.4（可选）真实密钥端到端：`agents-rag ask` 对比 `QUERY_REWRITE_ENABLED` 开关前后
+- [x] 4.4（可选）真实密钥端到端：`agents-rag ask` 对比 `QUERY_REWRITE_ENABLED` 开关前后
