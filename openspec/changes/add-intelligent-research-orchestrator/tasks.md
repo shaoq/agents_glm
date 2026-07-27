@@ -47,16 +47,16 @@
 
 ## 5. Goal Normalization and Dynamic Planning
 
-- [ ] 5.1 Define GoalNormalizer and Planner Model Ports with structured Proposal outputs
-- [ ] 5.2 Implement GoalSpec and Completion Contract schema validation
-- [ ] 5.3 Implement material ambiguity detection and GOAL_CLARIFICATION Proposal
-- [ ] 5.4 Implement PlanGraph Proposal parsing without Task materialization side effects
-- [ ] 5.5 Implement deterministic DAG, cycle, Task contract, Registry, permission, budget, depth, concurrency, and deliverable-path validation
-- [ ] 5.6 Implement Plan acceptance that atomically stores Plan Version and materializes Tasks and dependencies
-- [ ] 5.7 Implement Plan rejection diagnostics without partial Task creation
-- [ ] 5.8 Implement versioned Completion Contract amendment with actor, reason, and invalidated validations
-- [ ] 5.9 Implement bounded Replan with preserved accepted work, precise dependency invalidation, and SUPERSEDED Tasks
-- [ ] 5.10 Add unit/property tests for Plan limits, cycles, unsupported capabilities, missing deliverables, and Replan preservation
+- [x] 5.1 Define GoalNormalizer and Planner Model Ports with structured Proposal outputs
+- [x] 5.2 Implement GoalSpec and Completion Contract schema validation
+- [x] 5.3 Implement material ambiguity detection and GOAL_CLARIFICATION Proposal
+- [x] 5.4 Implement PlanGraph Proposal parsing without Task materialization side effects
+- [x] 5.5 Implement deterministic DAG, cycle, Task contract, Registry, permission, budget, depth, concurrency, and deliverable-path validation
+- [x] 5.6 Implement Plan acceptance that atomically stores Plan Version and materializes Tasks and dependencies
+- [x] 5.7 Implement Plan rejection diagnostics without partial Task creation
+- [x] 5.8 Implement versioned Completion Contract amendment with actor, reason, and invalidated validations
+- [x] 5.9 Implement bounded Replan with preserved accepted work, precise dependency invalidation, and SUPERSEDED Tasks
+- [x] 5.10 Add unit/property tests for Plan limits, cycles, unsupported capabilities, missing deliverables, and Replan preservation
 
 ## 6. Worker and Capability Core
 
