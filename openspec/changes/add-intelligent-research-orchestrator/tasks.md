@@ -136,16 +136,16 @@
 
 ## 12. Configuration, Security, and Observability
 
-- [ ] 12.1 Implement pydantic-settings for SQLite, Artifact path, Model profiles, Registry, Run policy defaults, and system maximums
-- [ ] 12.2 Enforce that Run Policy can only remain within or tighten system policy
-- [ ] 12.3 Keep Web disabled by default and enforce allowed-domain policy before network invocation
-- [ ] 12.4 Ensure secrets are loaded only at Adapter boundaries and redacted from Prompt, State, Event, Checkpoint, Artifact, diagnostics, and logs
-- [ ] 12.5 Register only first-release read-only Capabilities and add a test that rejects write Capability proposals
-- [ ] 12.6 Implement untrusted Evidence labeling and separation from Control Instructions
-- [ ] 12.7 Implement JSONL structured logs correlated by Run, Task, Attempt, Operation, Gate, and Plan IDs
-- [ ] 12.8 Implement token, cost, latency, retry, and degradation Usage Ledger
-- [ ] 12.9 Implement safe Event streaming used by `run watch`
-- [ ] 12.10 Add security tests for prompt injection content, cross-scope Memory requests, domain policy, and secret redaction
+- [x] 12.1 Implement pydantic-settings for SQLite, Artifact path, Model profiles, Registry, Run policy defaults, and system maximums
+- [x] 12.2 Enforce that Run Policy can only remain within or tighten system policy
+- [x] 12.3 Keep Web disabled by default and enforce allowed-domain policy before network invocation
+- [x] 12.4 Ensure secrets are loaded only at Adapter boundaries and redacted from Prompt, State, Event, Checkpoint, Artifact, diagnostics, and logs
+- [x] 12.5 Register only first-release read-only Capabilities and add a test that rejects write Capability proposals
+- [x] 12.6 Implement untrusted Evidence labeling and separation from Control Instructions
+- [x] 12.7 Implement JSONL structured logs correlated by Run, Task, Attempt, Operation, Gate, and Plan IDs
+- [x] 12.8 Implement token, cost, latency, retry, and degradation Usage Ledger
+- [x] 12.9 Implement safe Event streaming used by `run watch`
+- [x] 12.10 Add security tests for prompt injection content, cross-scope Memory requests, domain policy, and secret redaction
 
 ## 13. End-to-End Verification and Documentation
 
