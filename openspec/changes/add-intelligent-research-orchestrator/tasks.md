@@ -85,15 +85,15 @@
 
 ## 8. Parallel Research and Evidence Join
 
-- [ ] 8.1 Implement stable Branch identities and Required, Optional, Conditional, Any-of, and Quorum roles
-- [ ] 8.2 Implement bounded concurrent dispatch of independent Memory, RAG, and authorized Web Tasks
-- [ ] 8.3 Persist each accepted Branch result independently before Join
-- [ ] 8.4 Implement Evidence normalization with source identity, timestamp, freshness, citation, trust, and degradation metadata
-- [ ] 8.5 Implement source-identity deduplication without overstating independent evidence count
-- [ ] 8.6 Implement material conflict detection and conflict-preserving EvidenceSet output
-- [ ] 8.7 Implement Required/Optional Branch aggregation and Evidence Sufficiency states
-- [ ] 8.8 Implement configured behavior for optional lane failure, required lane failure, and unresolved conflict
-- [ ] 8.9 Add parallel failure/restart tests proving accepted Branches are not repeated
+- [x] 8.1 Implement stable Branch identities and Required, Optional, Conditional, Any-of, and Quorum roles
+- [x] 8.2 Implement bounded concurrent dispatch of independent Memory, RAG, and authorized Web Tasks
+- [x] 8.3 Persist each accepted Branch result independently before Join
+- [x] 8.4 Implement Evidence normalization with source identity, timestamp, freshness, citation, trust, and degradation metadata
+- [x] 8.5 Implement source-identity deduplication without overstating independent evidence count
+- [x] 8.6 Implement material conflict detection and conflict-preserving EvidenceSet output
+- [x] 8.7 Implement Required/Optional Branch aggregation and Evidence Sufficiency states
+- [x] 8.8 Implement configured behavior for optional lane failure, required lane failure, and unresolved conflict
+- [x] 8.9 Add parallel failure/restart tests proving accepted Branches are not repeated
 
 ## 9. Human Gate and Controlled Resume
 
