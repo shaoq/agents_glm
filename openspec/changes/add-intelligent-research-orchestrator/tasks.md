@@ -108,17 +108,17 @@
 
 ## 10. Analysis, Report, Review, and Finalization
 
-- [ ] 10.1 Implement immutable EvidenceSet and AnalysisArtifact production with evidence-linked conclusions
-- [ ] 10.2 Implement ReportWriter output schema for Markdown and structured report content
-- [ ] 10.3 Implement ReportReviewer PASS, REVISE, RESEARCH_GAP, CONFLICT, and ESCALATE Proposals
-- [ ] 10.4 Implement bounded revision handling and shared Run budget accounting
-- [ ] 10.5 Connect RESEARCH_GAP and material conflict Proposals to Replan or Gate policy
-- [ ] 10.6 Implement deterministic Completion Contract evaluation with SATISFIED, UNSATISFIED, UNKNOWN, and NOT_APPLICABLE
-- [ ] 10.7 Implement Candidate State freeze and compare-and-set terminal commit
-- [ ] 10.8 Implement Citation integrity validation against Evidence IDs and source metadata
-- [ ] 10.9 Generate immutable `report.md`, `report.json`, and `run-summary.json`
-- [ ] 10.10 Include degradation, unmet criteria, missing sources, unresolved conflicts, and termination reason in partial outputs
-- [ ] 10.11 Add tests proving report recommendations cannot trigger write-side-effect Capabilities
+- [x] 10.1 Implement immutable EvidenceSet and AnalysisArtifact production with evidence-linked conclusions
+- [x] 10.2 Implement ReportWriter output schema for Markdown and structured report content
+- [x] 10.3 Implement ReportReviewer PASS, REVISE, RESEARCH_GAP, CONFLICT, and ESCALATE Proposals
+- [x] 10.4 Implement bounded revision handling and shared Run budget accounting
+- [x] 10.5 Connect RESEARCH_GAP and material conflict Proposals to Replan or Gate policy
+- [x] 10.6 Implement deterministic Completion Contract evaluation with SATISFIED, UNSATISFIED, UNKNOWN, and NOT_APPLICABLE
+- [x] 10.7 Implement Candidate State freeze and compare-and-set terminal commit
+- [x] 10.8 Implement Citation integrity validation against Evidence IDs and source metadata
+- [x] 10.9 Generate immutable `report.md`, `report.json`, and `run-summary.json`
+- [x] 10.10 Include degradation, unmet criteria, missing sources, unresolved conflicts, and termination reason in partial outputs
+- [x] 10.11 Add tests proving report recommendations cannot trigger write-side-effect Capabilities
 
 ## 11. Application Service and CLI
 
