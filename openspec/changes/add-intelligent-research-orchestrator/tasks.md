@@ -33,17 +33,17 @@
 
 ## 4. Durable Runtime Core
 
-- [ ] 4.1 Implement Scheduler Ready Work calculation from formal Task and dependency state
-- [ ] 4.2 Implement Lease claim, renewal, expiry, release, and monotonic Epoch behavior
-- [ ] 4.3 Implement BudgetGuard for Deadline, Task count, depth, concurrency, Attempt, Replan, revision, token, and cost limits
-- [ ] 4.4 Implement durable Retry classification, retry budget consumption, Backoff Timer, and wake-up handling
-- [ ] 4.5 Implement semantic Checkpoint creation for Plan, Branch result, Gate, Retry, Replan, and finalization boundaries
-- [ ] 4.6 Implement RecoveryManager that expires stale claims, inspects unknown calls, and rebuilds Ready Work
-- [ ] 4.7 Implement Attempt result validation against Active Attempt, Lease Epoch, Plan Version, State Version, and Task supersession
-- [ ] 4.8 Implement Late Result rejection with Observation retention
-- [ ] 4.9 Implement one bounded Runtime Tick for an explicitly selected Run
-- [ ] 4.10 Implement single-process Runtime Watch for one Run and for all eligible Runs
-- [ ] 4.11 Add restart, Lease loss, Late Result, Deadline, and duplicate Event integration tests
+- [x] 4.1 Implement Scheduler Ready Work calculation from formal Task and dependency state
+- [x] 4.2 Implement Lease claim, renewal, expiry, release, and monotonic Epoch behavior
+- [x] 4.3 Implement BudgetGuard for Deadline, Task count, depth, concurrency, Attempt, Replan, revision, token, and cost limits
+- [x] 4.4 Implement durable Retry classification, retry budget consumption, Backoff Timer, and wake-up handling
+- [x] 4.5 Implement semantic Checkpoint creation for Plan, Branch result, Gate, Retry, Replan, and finalization boundaries
+- [x] 4.6 Implement RecoveryManager that expires stale claims, inspects unknown calls, and rebuilds Ready Work
+- [x] 4.7 Implement Attempt result validation against Active Attempt, Lease Epoch, Plan Version, State Version, and Task supersession
+- [x] 4.8 Implement Late Result rejection with Observation retention
+- [x] 4.9 Implement one bounded Runtime Tick for an explicitly selected Run
+- [x] 4.10 Implement single-process Runtime Watch for one Run and for all eligible Runs
+- [x] 4.11 Add restart, Lease loss, Late Result, Deadline, and duplicate Event integration tests
 
 ## 5. Goal Normalization and Dynamic Planning
 
