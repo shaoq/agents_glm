@@ -21,15 +21,15 @@
 
 ## 3. Persistence and Artifact Infrastructure
 
-- [ ] 3.1 Define Repository, Transaction, EventStore, Outbox, ArtifactStore, Clock, and ID Generator Ports
-- [ ] 3.2 Implement SQLite schema creation and version tracking for all logical Runtime tables
-- [ ] 3.3 Implement SQLite repositories for Run, Goal, Completion Contract, Plan, Task, Dependency, Attempt, and Lease
-- [ ] 3.4 Implement SQLite repositories for Capability Call, Gate, Checkpoint, Event, Outbox, Artifact Metadata, and Request Deduplication
-- [ ] 3.5 Implement compare-and-set State Version updates and Lease Epoch fencing
-- [ ] 3.6 Implement atomic transaction support for State transition, Checkpoint, Event, and Outbox records
-- [ ] 3.7 Implement content-hashed immutable local Artifact Store and Artifact metadata validation
-- [ ] 3.8 Add orphan Artifact detection for files written before a failed SQLite transaction
-- [ ] 3.9 Add integration tests proving rollback prevents partial State/Event/Checkpoint/Outbox visibility
+- [x] 3.1 Define Repository, Transaction, EventStore, Outbox, ArtifactStore, Clock, and ID Generator Ports
+- [x] 3.2 Implement SQLite schema creation and version tracking for all logical Runtime tables
+- [x] 3.3 Implement SQLite repositories for Run, Goal, Completion Contract, Plan, Task, Dependency, Attempt, and Lease
+- [x] 3.4 Implement SQLite repositories for Capability Call, Gate, Checkpoint, Event, Outbox, Artifact Metadata, and Request Deduplication
+- [x] 3.5 Implement compare-and-set State Version updates and Lease Epoch fencing
+- [x] 3.6 Implement atomic transaction support for State transition, Checkpoint, Event, and Outbox records
+- [x] 3.7 Implement content-hashed immutable local Artifact Store and Artifact metadata validation
+- [x] 3.8 Add orphan Artifact detection for files written before a failed SQLite transaction
+- [x] 3.9 Add integration tests proving rollback prevents partial State/Event/Checkpoint/Outbox visibility
 
 ## 4. Durable Runtime Core
 

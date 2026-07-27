@@ -1,0 +1,154 @@
+"""SQLite schema creation and version tracking (design Decision 4 / task 3.2).
+
+Each table stores the query key columns (primary key, run/task linkage, state,
+versions) plus a ``data`` JSON blob holding the full immutable domain object.
+This keeps compare-and-set and indexed lookups cheap while mappers stay trivial
+and the schema stays stable as models evolve.
+
+Schema version is tracked via ``pragma user_version``.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+SCHEMA_VERSION = 1
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    run_id         TEXT PRIMARY KEY,
+    state          TEXT NOT NULL,
+    state_version  INTEGER NOT NULL,
+    termination    TEXT,
+    data           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_runs_state ON runs (state);
+
+CREATE TABLE IF NOT EXISTS goal_versions (
+    run_id  TEXT PRIMARY KEY,
+    data    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS completion_contracts (
+    run_id  TEXT PRIMARY KEY,
+    data    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_versions (
+    run_id     TEXT NOT NULL,
+    version    INTEGER NOT NULL,
+    acceptance TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    PRIMARY KEY (run_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    task_id       TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL,
+    plan_version  INTEGER NOT NULL,
+    state         TEXT NOT NULL,
+    data          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_tasks_run_plan ON tasks (run_id, plan_version);
+CREATE INDEX IF NOT EXISTS ix_tasks_run_state ON tasks (run_id, state);
+
+CREATE TABLE IF NOT EXISTS task_dependencies (
+    run_id       TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    predecessor  TEXT NOT NULL,
+    successor    TEXT NOT NULL,
+    data         TEXT NOT NULL,
+    PRIMARY KEY (run_id, plan_version, predecessor, successor)
+);
+
+CREATE TABLE IF NOT EXISTS attempts (
+    attempt_id TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL,
+    run_id     TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    data       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_attempts_task ON attempts (task_id);
+CREATE INDEX IF NOT EXISTS ix_attempts_run ON attempts (run_id);
+
+CREATE TABLE IF NOT EXISTS leases (
+    task_id     TEXT NOT NULL,
+    attempt_id  TEXT NOT NULL,
+    epoch       INTEGER NOT NULL,
+    state       TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    PRIMARY KEY (task_id, epoch)
+);
+CREATE INDEX IF NOT EXISTS ix_leases_state ON leases (state);
+
+CREATE TABLE IF NOT EXISTS operations (
+    operation_id     TEXT PRIMARY KEY,
+    attempt_id       TEXT NOT NULL,
+    dedup_request_id TEXT NOT NULL,
+    data             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_operations_attempt ON operations (attempt_id);
+
+CREATE TABLE IF NOT EXISTS gates (
+    gate_id TEXT PRIMARY KEY,
+    run_id  TEXT NOT NULL,
+    state   TEXT NOT NULL,
+    data    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_gates_run_state ON gates (run_id, state);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+    checkpoint_id TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL,
+    data          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_checkpoints_run ON checkpoints (run_id);
+
+CREATE TABLE IF NOT EXISTS events (
+    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id      TEXT NOT NULL UNIQUE,
+    run_id        TEXT NOT NULL,
+    state_version INTEGER NOT NULL,
+    data          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_events_run_version ON events (run_id, state_version);
+
+CREATE TABLE IF NOT EXISTS outbox (
+    outbox_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT NOT NULL,
+    event_id     TEXT NOT NULL,
+    published_at TEXT,
+    data         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_outbox_pending ON outbox (published_at);
+
+CREATE TABLE IF NOT EXISTS artifact_metadata (
+    artifact_id  TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL UNIQUE,
+    path         TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    data         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_artifact_hash ON artifact_metadata (content_hash);
+
+CREATE TABLE IF NOT EXISTS request_deduplication (
+    request_id TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    result     TEXT,
+    created_at TEXT NOT NULL
+);
+"""
+
+
+def initialize(conn: sqlite3.Connection) -> None:
+    """Create all tables (idempotent) and stamp the schema version."""
+
+    conn.executescript(_SCHEMA)
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    if current != SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("PRAGMA user_version").fetchone()[0])
