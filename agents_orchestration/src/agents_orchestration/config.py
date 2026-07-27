@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 
@@ -35,7 +36,22 @@ class Settings(BaseSettings):
 
     # --- Web Research (disabled by default; opt-in per Run Policy, task 12.3) ---
     web_enabled: bool = Field(default=False)
-    web_allowed_domains: tuple[str, ...] = Field(default_factory=tuple)
+    # NoDecode + before-validator: accept empty / comma-separated / JSON array.
+    web_allowed_domains: Annotated[tuple[str, ...], NoDecode] = Field(default_factory=tuple)
+
+    @field_validator("web_allowed_domains", mode="before")
+    @classmethod
+    def _parse_web_domains(cls, value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return ()
+            if text.startswith("["):
+                import json
+
+                return tuple(json.loads(text))
+            return tuple(d.strip() for d in text.split(",") if d.strip())
+        return tuple(value)  # type: ignore[arg-type]
 
     # --- Model profiles (OpenAI-compatible; secrets read only at Adapter boundary) ---
     llm_api_key: str = Field(default="")
