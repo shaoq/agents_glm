@@ -97,14 +97,14 @@
 
 ## 9. Human Gate and Controlled Resume
 
-- [ ] 9.1 Implement typed GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW Gate schemas
-- [ ] 9.2 Implement Gate creation bound to actor/role, scope, State Version, Plan Version, Artifact Hash, expiry, and allowed response
-- [ ] 9.3 Atomically persist Gate, waiting state, Event, Checkpoint, and Outbox before releasing execution resources
-- [ ] 9.4 Implement actor, role, scope, schema, expiry, version, and Artifact validation for Gate responses
-- [ ] 9.5 Implement Request ID deduplication and at-most-once Gate response consumption
-- [ ] 9.6 Implement Resume Event creation with new Attempt/Lease claim rather than old process continuation
-- [ ] 9.7 Implement Gate expiry and configured cancel, fail, partial, default, or escalate actions
-- [ ] 9.8 Add tests for unauthorized, stale, duplicate, expired, and Artifact-mismatched Gate responses
+- [x] 9.1 Implement typed GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW Gate schemas
+- [x] 9.2 Implement Gate creation bound to actor/role, scope, State Version, Plan Version, Artifact Hash, expiry, and allowed response
+- [x] 9.3 Atomically persist Gate, waiting state, Event, Checkpoint, and Outbox before releasing execution resources
+- [x] 9.4 Implement actor, role, scope, schema, expiry, version, and Artifact validation for Gate responses
+- [x] 9.5 Implement Request ID deduplication and at-most-once Gate response consumption
+- [x] 9.6 Implement Resume Event creation with new Attempt/Lease claim rather than old process continuation
+- [x] 9.7 Implement Gate expiry and configured cancel, fail, partial, default, or escalate actions
+- [x] 9.8 Add tests for unauthorized, stale, duplicate, expired, and Artifact-mismatched Gate responses
 
 ## 10. Analysis, Report, Review, and Finalization
 

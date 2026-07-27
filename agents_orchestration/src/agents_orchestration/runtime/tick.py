@@ -114,6 +114,11 @@ class RuntimeTick:
             if not decision.allowed:
                 return self._terminate(uow, run, decision.violations, now)
 
+            if uow.gates.open_for_run(run.run_id):
+                # A version-bound Human Gate holds the Run; resume creates a new
+                # Attempt/Lease after the Gate is consumed (task 9.6).
+                return TickReport(run_id, blocked=True)
+
             scheduler = Scheduler(uow)
             ready = scheduler.ready_work(run, max_concurrency=run.policy.max_concurrency)
             if not ready:
@@ -285,8 +290,7 @@ class RuntimeTick:
                 state_version=run.state_version,
                 plan_version=run.current_plan_version,
                 reason=(
-                    f"retry {task.task_id} after {code.value} "
-                    f"backoff={decision.backoff_seconds}s"
+                    f"retry {task.task_id} after {code.value} backoff={decision.backoff_seconds}s"
                 ),
             )
             uow.events.append(
