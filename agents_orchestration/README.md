@@ -17,6 +17,28 @@
 - Python Service API + Typer CLI；
 - 不可变交付物 `report.md`、`report.json`、`run-summary.json`。
 
+## 执行模型（RunCoordinator）
+
+公开入口 `start_and_drive(raw_goal, request_id)` 创建 CREATED Run 并驱动 `RunCoordinator`
+走完固定 7 阶段生命周期，直到 terminal 或显式 block：
+
+```
+CLI / Python API → OrchestrationService → RunCoordinator.advance
+  ├── CREATED → NORMALIZING（Goal：normalize + Completion Contract）
+  ├── PLANNING（Plan：propose + 确定性 validate + accept，可选 PLAN_APPROVAL Gate）
+  ├── RESEARCHING（EVIDENCE_RESEARCHER Task + Evidence Join → EvidenceSet）
+  ├── ANALYZING（ANALYST Task → AnalysisArtifact）
+  ├── WRITING（REPORT_WRITER Task → Report Draft）
+  ├── REVIEWING（REPORT_REVIEWER → PASS/REVISE/RESEARCH_GAP/CONFLICT/ESCALATE，有界 revision/Replan）
+  └── FINALIZING（CompletionEvaluator + ReportBuilder + Finalizer → terminal + report artifacts）
+```
+
+- 每次 `advance` 至多推进一个语义 phase，返回 `AdvanceReport`（PROGRESSED / BLOCKED / IDLE / TERMINAL）；
+- model / evidence 内容只能发 Proposal，正式 state 转换由确定性组件决定；
+- Gate 携带 version-bound continuation，consume 时确定性恢复下一 phase（caller 无法任意指定 target）；
+- `--create-only` 只持久化 CREATED Run；`runtime tick RUN_ID` 为单次 advance；`runtime watch` 循环 advance；
+- `TaskRuntimeTick` 仍是 Task attempt 执行单元，按当前 phase 过滤 eligible Worker role。
+
 ## 只读边界（首期强制）
 
 首期通过 Capability Registry 物理限制为**只读**：不注册发布、邮件、支付、部署、代码执行或文件修改
