@@ -65,6 +65,8 @@ class WorkerExecutor:
             result = await handler.handle(task, attempt, run, invoke)
         except WorkerFailure as failure:
             return TaskExecutionOutcome(False, failure_code=failure.code)
+        except Exception:  # noqa: BLE001 - handler errors (e.g. PortError) degrade, never crash the Run
+            return TaskExecutionOutcome(False, failure_code=FailureCode.UPSTREAM_ERROR)
         # Task 6.3: a worker may only emit a TaskResult.
         if not isinstance(result, TaskResult):
             return TaskExecutionOutcome(False, failure_code=FailureCode.INVALID_RESPONSE)
