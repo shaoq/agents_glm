@@ -23,10 +23,10 @@
 
 ## 4. Production Composition & CLI
 
-- [ ] 4.1 `build_production_coordinator(backend, settings)`: register `OpenAIModelAdapter` as MODEL capability; wire 5 LLM ports + Research LLM-provider + evidence_provider; Memory/RAG/Web stay Fake placeholders (TODO comment for sibling change)
-- [ ] 4.2 Fail-loudly: missing required port → `CompositionError`; do not silently substitute Fake
-- [ ] 4.3 CLI `run start` defaults to production composition; `--create-only` unchanged; offline composition only for tests
-- [ ] 4.4 Architecture test: adapters still confine sibling/provider imports; secret redaction covers new tools-mode result
+- [x] 4.1 `build_production_coordinator(backend, settings)`: register `OpenAIModelAdapter` as MODEL capability; wire 5 LLM ports + Research LLM-provider + evidence_provider; Memory/RAG/Web stay Fake placeholders (TODO comment for sibling change)
+- [x] 4.2 Fail-loudly: missing required port → `CompositionError`; do not silently substitute Fake
+- [x] 4.3 CLI `run start` defaults to production composition; `--create-only` unchanged; offline composition only for tests
+- [x] 4.4 Architecture test: adapters still confine sibling/provider imports; secret redaction covers new tools-mode result
 
 ## 5. Testing & Verification
 

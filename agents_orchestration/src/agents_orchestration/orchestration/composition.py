@@ -303,8 +303,150 @@ def build_production_coordinator(
     return RunCoordinator(backend, handlers)
 
 
+# --- LLM production composition (Ch.4 tasks 4.1/4.2) ---
+
+
+class _LLMResearchHandler:
+    """EVIDENCE_RESEARCHER WorkerExecutor handler backed by the LLM knowledge
+    source (R1). Produces untrusted MODEL-sourced Evidence directly via the
+    adapter, bypassing the Router (phase-level trusted component, not an
+    untrusted task worker)."""
+
+    def __init__(self, adapter, idgen) -> None:
+        from agents_orchestration.orchestration.llm_ports import LLMResearchProvider
+
+        self._provider = LLMResearchProvider(adapter, idgen)
+
+    async def handle(self, task, attempt, run, invoke):
+        from agents_orchestration.domain.worker import TaskResult
+
+        evidences = await self._provider(run.run_id, run.raw_goal)
+        return TaskResult(
+            attempt_id=attempt.attempt_id,
+            task_id=task.task_id,
+            run_id=run.run_id,
+            worker_role=task.worker_role,
+            evidence=evidences,
+            summary="llm-research",
+        )
+
+
+class _NoopHandler:
+    """Placeholder handler for Analysis/Write/Review Tasks: the real logic runs
+    in the phase port (LLMAnalyst/Writer/Reviewer); the Task just succeeds so
+    the phase handler proceeds to call the port."""
+
+    async def handle(self, task, attempt, run, invoke):
+        from agents_orchestration.domain.worker import TaskResult
+
+        return TaskResult(
+            attempt_id=attempt.attempt_id,
+            task_id=task.task_id,
+            run_id=run.run_id,
+            worker_role=task.worker_role,
+            summary="noop-phase-task",
+        )
+
+
+def build_production_coordinator_from_settings(backend, settings=None) -> RunCoordinator:
+    """Production composition from Settings (Ch.4 tasks 4.1/4.2).
+
+    Wires real LLM-backed ports (GoalNormalizer/Planner/Analyst/Writer/Reviewer)
+    via function calling, an LLM research handler (R1), and persisted-evidence
+    providers. Memory/RAG/Web adapters stay Fake (deferred to a sibling change).
+
+    TODO: AnalysisArtifact/ReportContent are not yet persisted across phases, so
+    analysis_provider/report_provider re-invoke the LLM (MVP — accepts a double
+    call; persist outputs in a follow-up to avoid it).
+    """
+
+    from agents_orchestration.adapters.base import ModelProfile
+    from agents_orchestration.adapters.model import OpenAIModelAdapter
+    from agents_orchestration.capabilities.registry import CapabilityRegistry
+    from agents_orchestration.capabilities.router import CapabilityRouter
+    from agents_orchestration.config import load_settings
+    from agents_orchestration.domain.enums import CapabilityKind, WorkerRole
+    from agents_orchestration.orchestration.llm_ports import (
+        LLMAnalyst,
+        LLMGoalNormalizer,
+        LLMPlanner,
+        LLMReportReviewer,
+        LLMReportWriter,
+    )
+    from agents_orchestration.workers.executor import WorkerExecutor
+    from agents_orchestration.workers.registry import WorkerRegistry
+
+    settings = settings or load_settings()
+    profile = ModelProfile(
+        name=settings.model_planner,
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+    )
+    adapter = OpenAIModelAdapter(profile)
+    idgen = backend.idgen
+    limits = settings.build_limits()
+    policy = settings.build_run_policy()
+
+    normalizer = LLMGoalNormalizer(adapter, idgen)
+    planner = LLMPlanner(adapter, idgen)
+    analyst = LLMAnalyst(adapter, idgen)
+    writer = LLMReportWriter(adapter, idgen)
+    reviewer = LLMReportReviewer(adapter, idgen)
+
+    registry = CapabilityRegistry()
+    workers = WorkerRegistry.default()
+    router = CapabilityRouter(registry, idgen)
+    research_handler = _LLMResearchHandler(adapter, idgen)
+    noop = _NoopHandler()
+    handlers = {
+        WorkerRole.EVIDENCE_RESEARCHER: research_handler,
+        WorkerRole.ANALYST: noop,
+        WorkerRole.REPORT_WRITER: noop,
+        WorkerRole.REPORT_REVIEWER: noop,
+    }
+    executor = WorkerExecutor(workers, router, handlers, policy)
+
+    async def research_evidence(run_id: str):
+        with backend.unit_of_work() as uow:
+            return tuple(uow.evidence.by_run(run_id))
+
+    async def evidence_set(run_id: str) -> EvidenceSet:
+        with backend.unit_of_work() as uow:
+            evs = tuple(uow.evidence.by_run(run_id))
+        return EvidenceSet.join(run_id=run_id, task_id="research", evidences=evs, required=False)
+
+    async def analysis_provider(run_id: str):
+        ev = await evidence_set(run_id)
+        return await analyst(run_id, ev)
+
+    async def report_provider(run_id: str):
+        analysis = await analysis_provider(run_id)
+        return await writer(run_id, analysis)
+
+    async def deliverables_provider(run_id: str) -> dict[str, bool]:
+        return {_DELIVERABLE: True}
+
+    return build_production_coordinator(
+        backend,
+        executor=executor,
+        normalizer=normalizer,
+        planner=planner,
+        analyst=analyst,
+        writer=writer,
+        reviewer=reviewer,
+        research_evidence=research_evidence,
+        evidence_set=evidence_set,
+        analysis_provider=analysis_provider,
+        report_provider=report_provider,
+        deliverables_provider=deliverables_provider,
+        allowed_capabilities=frozenset(CapabilityKind),
+        limits=limits,
+    )
+
+
 __all__ = [
     "CompositionError",
     "build_offline_coordinator",
     "build_production_coordinator",
+    "build_production_coordinator_from_settings",
 ]

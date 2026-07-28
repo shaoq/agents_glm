@@ -107,6 +107,7 @@ class OrchestrationService:
         limits: SystemLimits | None = None,
         capability_registry: CapabilityRegistry | None = None,
         run_policy: RunPolicy | None = None,
+        production: bool = False,
     ) -> None:
         self.backend = backend
         self.limits = limits or SystemLimits()
@@ -117,6 +118,7 @@ class OrchestrationService:
         handler = DefaultWorkerHandler(self.capability_registry, backend.idgen)
         self._handlers = {role: handler for role in WorkerRole}
         self._executor = WorkerExecutor(self.workers, self.router, self._handlers, self.run_policy)
+        self._production = production
         self._coordinator = None
 
     # --- 11.1 / 11.2 run lifecycle -------------------------------------------
@@ -233,7 +235,14 @@ class OrchestrationService:
     @property
     def coordinator(self):
         if self._coordinator is None:
-            self._coordinator = build_offline_coordinator(self.backend)
+            if self._production:
+                from agents_orchestration.orchestration.composition import (
+                    build_production_coordinator_from_settings,
+                )
+
+                self._coordinator = build_production_coordinator_from_settings(self.backend)
+            else:
+                self._coordinator = build_offline_coordinator(self.backend)
         return self._coordinator
 
     def create_run(self, raw_goal: str, *, request_id: str) -> Run:

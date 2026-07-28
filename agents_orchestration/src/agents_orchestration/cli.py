@@ -26,7 +26,7 @@ def _service() -> OrchestrationService:
     from agents_orchestration.runtime.persistence.connection import SqliteBackend
 
     backend = SqliteBackend(settings.sqlite_path, settings.artifact_dir)
-    return OrchestrationService(backend)
+    return OrchestrationService(backend, production=True)
 
 
 def _exit_for(exc: Exception) -> int:
