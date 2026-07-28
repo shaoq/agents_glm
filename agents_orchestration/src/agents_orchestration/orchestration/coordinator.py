@@ -81,6 +81,8 @@ class PhaseOutcome:
     open_gate: GateType | None = None
     failure_code: FailureCode | None = None
     proposal: object | None = None
+    bump_revision: bool = False
+    bump_replan: bool = False
 
 
 class PhaseHandler(Protocol):
@@ -262,11 +264,10 @@ class RunCoordinator:
             if outcome.input_fingerprint is not None:
                 self._persist_observation_stage(uow, run, phase, outcome, now)
             if outcome.open_gate is not None:
-                self._open_gate(uow, run, outcome)
-            uow.events.append([
-                self._event(run, EffectType.RUN_STATE_TRANSITION, now,
-                            payload={"phase": phase.value, "blocked": True})
-            ])
+                self._open_gate(uow, run, outcome)  # emits GATE_OPENED
+            # No RUN_STATE_TRANSITION event: a BLOCKED outcome does not change
+            # Run state (from_state == to_state); the gate/observation record
+            # carries the blocking condition.
             uow.commit()
         return AdvanceReport(
             run_id=run.run_id, from_state=run.state, to_state=run.state,

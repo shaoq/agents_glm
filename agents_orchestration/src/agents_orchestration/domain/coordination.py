@@ -327,7 +327,7 @@ def build_gate_continuation(gate_type: GateType, run) -> GateContinuation:
         origin_phase=phase.value if phase else run.state.value,
         bound_state_version=run.state_version,
         bound_plan_version=run.current_plan_version,
-        next_state_by_outcome=dict(GATE_CONTINUATION_NEXT.get(gate_type, {})),
+        next_state_by_outcome=tuple(GATE_CONTINUATION_NEXT.get(gate_type, {}).items()),
     )
 
 
@@ -340,20 +340,28 @@ def apply_gate_continuation(gate, run, outcome: str, now):
     (task 8.7) — it comes solely from the persisted continuation.
     """
 
-    from agents_orchestration.domain.state_machine import assert_run_transition
+    from agents_orchestration.domain.state_machine import (
+        StateTransitionError,
+        assert_run_transition,
+    )
 
     cont = gate.continuation
     if cont is None:
         return run
     if cont.bound_state_version != run.state_version:
-        return run  # stale binding (task 8.4)
+        return run  # stale state binding (task 8.4)
+    if cont.bound_plan_version is not None and cont.bound_plan_version != run.current_plan_version:
+        return run  # stale plan binding (e.g. after a Replan shifted the plan)
     target = cont.next_state_for(outcome)
     if target is None:
         return run  # unknown outcome
     target_state = RunState(target)
     if target_state is run.state:
         return run
-    assert_run_transition(run.state, target_state)
+    try:
+        assert_run_transition(run.state, target_state)
+    except StateTransitionError:
+        return run  # invalid continuation mapping — advance nothing
     return run.transition(target_state, now)
 
 

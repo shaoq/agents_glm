@@ -268,11 +268,14 @@ async def _drive_all(svc: OrchestrationService) -> dict:
         run_ids = [run.run_id for run in uow.runs.list_resumable()]
     out: dict[str, dict] = {}
     for rid in run_ids:
-        report = await svc.drive_run(rid)
-        out[rid] = {
-            "disposition": report.disposition.value,
-            "to_state": report.to_state.value,
-        }
+        try:
+            report = await svc.drive_run(rid)
+            out[rid] = {
+                "disposition": report.disposition.value,
+                "to_state": report.to_state.value,
+            }
+        except Exception as exc:  # noqa: BLE001 — one Run must not abort the batch
+            out[rid] = {"disposition": "error", "to_state": "unknown", "error": str(exc)}
     return out
 
 

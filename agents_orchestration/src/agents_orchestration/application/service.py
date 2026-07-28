@@ -188,6 +188,8 @@ class OrchestrationService:
         blocked (task 10.4). Unlike the legacy Watch, a zero-dispatch tick no
         longer counts as blocked — IDLE phases (Goal/Plan/Finalize) progress."""
 
+        if max_advances <= 0:
+            raise ValueError("max_advances must be positive")
         last = await self.coordinator.advance(run_id)
         for _ in range(max_advances - 1):
             if last.disposition in (AdvanceDisposition.TERMINAL, AdvanceDisposition.BLOCKED):
@@ -220,7 +222,10 @@ class OrchestrationService:
 
         run = self.create_run(raw_goal, request_id=request_id)
         await self.drive_run(run.run_id)
-        return self.get_run(run.run_id)
+        result = self.get_run(run.run_id)
+        if result is None:  # defensive: the run should not disappear mid-drive
+            raise RuntimeError(f"run {run.run_id} disappeared after drive")
+        return result
 
     async def drive_run_legacy(self, run_id: str, *, max_ticks: int = 1000):
         """Deprecated Watch-based drive retained for compatibility (task 10.5)."""

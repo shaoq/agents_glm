@@ -79,10 +79,13 @@ class GateContinuation(BaseModel):
     bound_plan_version: int | None = None
     bound_contract_version: int | None = None
     bound_artifact_hash: str | None = None
-    next_state_by_outcome: dict[str, str] = Field(default_factory=dict)
+    # Tuple of (outcome, next_state) — immutable and JSON-serializable, so the
+    # continuation cannot be tampered with after construction and still persists
+    # in the Gate's data blob (unlike a mutable dict or MappingProxyType).
+    next_state_by_outcome: tuple[tuple[str, str], ...] = ()
 
     def next_state_for(self, outcome: str) -> str | None:
-        return self.next_state_by_outcome.get(outcome)
+        return dict(self.next_state_by_outcome).get(outcome)
 
 
 class Gate(BaseModel):

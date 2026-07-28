@@ -55,7 +55,8 @@ def _imported_modules(path: Path) -> set[str]:
 
     Unlike :func:`_import_roots`, this preserves the full dotted path so layer
     rules such as "runtime must not import agents_orchestration.application"
-    can be checked precisely.
+    can be checked precisely. Relative imports (``from .`` / ``from ..``) are
+    rejected so layer rules cannot be bypassed by a non-resolved relative path.
     """
 
     module = ast.parse(path.read_text(encoding="utf-8"))
@@ -63,8 +64,13 @@ def _imported_modules(path: Path) -> set[str]:
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
             mods.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            mods.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                raise NotImplementedError(
+                    f"Relative import (level={node.level}) in {path}; use absolute imports"
+                )
+            if node.module:
+                mods.add(node.module)
     return mods
 
 

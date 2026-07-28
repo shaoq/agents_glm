@@ -209,6 +209,8 @@ class PlanningPhaseHandler:
     def accept(self, outcome: PhaseOutcome, run: Run, uow, now: datetime) -> Run:
         proposal = outcome.proposal
         completion = uow.completion.get(run.run_id)
+        if completion is None:
+            return run  # stale: contract missing, no Tasks materialized
         validation = self.validator.validate(
             proposal,
             policy=run.policy,
@@ -400,8 +402,17 @@ class AnalysisPhaseHandler:
         if driving is not None:
             return driving
         if all(t.state is TaskState.SUCCEEDED for t in tasks):
-            evidence = await self.evidence_provider(ctx.run.run_id)
-            analysis = await self.analyst(ctx.run.run_id, evidence)
+            try:
+                evidence = await self.evidence_provider(ctx.run.run_id)
+                analysis = await self.analyst(ctx.run.run_id, evidence)
+            except Exception as exc:  # provider failure -> degrade (task 7.2)
+                return PhaseOutcome(
+                    disposition=AdvanceDisposition.IDLE,
+                    reason=f"analyze-provider-failed:{type(exc).__name__}",
+                    failure_code=FailureCode.UPSTREAM_ERROR,
+                    stage_logical_key="analyze",
+                    input_fingerprint=fp,
+                )
             return PhaseOutcome(
                 disposition=AdvanceDisposition.PROGRESSED,
                 next_state=RunState.WRITING,
@@ -440,8 +451,17 @@ class WritingPhaseHandler:
         if driving is not None:
             return driving
         if all(t.state is TaskState.SUCCEEDED for t in tasks):
-            analysis = await self.analysis_provider(ctx.run.run_id)
-            report = await self.writer(ctx.run.run_id, analysis)
+            try:
+                analysis = await self.analysis_provider(ctx.run.run_id)
+                report = await self.writer(ctx.run.run_id, analysis)
+            except Exception as exc:  # provider failure -> degrade (task 7.4)
+                return PhaseOutcome(
+                    disposition=AdvanceDisposition.IDLE,
+                    reason=f"write-provider-failed:{type(exc).__name__}",
+                    failure_code=FailureCode.UPSTREAM_ERROR,
+                    stage_logical_key="write",
+                    input_fingerprint=fp,
+                )
             return PhaseOutcome(
                 disposition=AdvanceDisposition.PROGRESSED,
                 next_state=RunState.REVIEWING,
@@ -490,8 +510,17 @@ class ReviewPhaseHandler:
                 stage_logical_key="review",
                 input_fingerprint=fp,
             )
-        report = await self.report_provider(ctx.run.run_id)
-        proposal = await self.reviewer(ctx.run.run_id, report)
+        try:
+            report = await self.report_provider(ctx.run.run_id)
+            proposal = await self.reviewer(ctx.run.run_id, report)
+        except Exception as exc:  # provider failure -> degrade (task 7.6)
+            return PhaseOutcome(
+                disposition=AdvanceDisposition.IDLE,
+                reason=f"review-provider-failed:{type(exc).__name__}",
+                failure_code=FailureCode.UPSTREAM_ERROR,
+                stage_logical_key="review",
+                input_fingerprint=fp,
+            )
         return self._map_verdict(ctx, proposal, fp)
 
     def _map_verdict(self, ctx: PhaseContext, proposal: ReviewProposal, fp) -> PhaseOutcome:
@@ -522,6 +551,7 @@ class ReviewPhaseHandler:
                 stage_logical_key="review",
                 input_fingerprint=fp,
                 proposal=proposal,
+                bump_revision=True,
             )
         if verdict is ReviewVerdict.RESEARCH_GAP:  # focused Replan if budget remains
             if ctx.run.replan_count >= ctx.run.policy.max_replans:
@@ -541,6 +571,7 @@ class ReviewPhaseHandler:
                 stage_logical_key="review",
                 input_fingerprint=fp,
                 proposal=proposal,
+                bump_replan=True,
             )
         # CONFLICT / ESCALATE -> conflict Gate (7.7)
         return PhaseOutcome(
@@ -559,9 +590,10 @@ class ReviewPhaseHandler:
             assert_run_transition(run.state, outcome.next_state)
             updates["state"] = outcome.next_state
         # Monotonic counters — never reset across phase transitions (task 7.8).
-        if outcome.reason == "review-revise":
+        # Structured flags (not reason-string matching) drive the bumps.
+        if outcome.bump_revision:
             updates["revision_count"] = run.revision_count + 1
-        if outcome.reason == "review-replan":
+        if outcome.bump_replan:
             updates["replan_count"] = run.replan_count + 1
         if not updates:
             return run
@@ -597,10 +629,19 @@ class FinalizePhaseHandler:
 
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
-        report = await self.report_provider(ctx.run.run_id)
-        analysis = await self.analysis_provider(ctx.run.run_id)
-        evidence = await self.evidence_provider(ctx.run.run_id)
-        deliverables = await self.deliverables_provider(ctx.run.run_id)
+        try:
+            report = await self.report_provider(ctx.run.run_id)
+            analysis = await self.analysis_provider(ctx.run.run_id)
+            evidence = await self.evidence_provider(ctx.run.run_id)
+            deliverables = await self.deliverables_provider(ctx.run.run_id)
+        except Exception as exc:  # provider failure -> degrade (task 7.10)
+            return PhaseOutcome(
+                disposition=AdvanceDisposition.IDLE,
+                reason=f"finalize-provider-failed:{type(exc).__name__}",
+                failure_code=FailureCode.UPSTREAM_ERROR,
+                stage_logical_key="finalize",
+                input_fingerprint=fp,
+            )
         return PhaseOutcome(
             disposition=AdvanceDisposition.PROGRESSED,
             next_state=None,
@@ -613,6 +654,10 @@ class FinalizePhaseHandler:
     def accept(self, outcome: PhaseOutcome, run: Run, uow, now) -> Run:
         report, analysis, evidence, deliverables = outcome.proposal
         contract = uow.completion.get(run.run_id)
+        if contract is None:
+            raise RuntimeError(
+                f"completion contract missing for run {run.run_id} at finalize"
+            )
         _per, overall = CompletionEvaluator().evaluate(
             contract,
             evidence=evidence,

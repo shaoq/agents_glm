@@ -153,6 +153,8 @@ CREATE TABLE IF NOT EXISTS stage_executions (
 );
 CREATE INDEX IF NOT EXISTS ix_stage_exec_run_key
     ON stage_executions (run_id, logical_stage_key);
+CREATE INDEX IF NOT EXISTS ix_stage_exec_idempotency
+    ON stage_executions (idempotency_key);
 -- At most one ACCEPTED result per Run + logical stage + input fingerprint
 -- (design Decision 5 / task 3.5). Enforced at the storage boundary so concurrent
 -- accepts cannot produce duplicate accepted results.

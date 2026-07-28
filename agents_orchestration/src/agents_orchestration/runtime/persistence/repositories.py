@@ -540,7 +540,10 @@ class SqliteStageExecutionRepository:
 
         fp_hex = accepted.fingerprint.hexdigest()
         already = self.accepted_for(accepted.run_id, accepted.logical_stage_key, fp_hex)
-        if already is not None and already.stage_execution_id != stage_execution_id:
+        if already is not None:
+            # Idempotent: an accepted result for this stage+fingerprint already
+            # exists (including a replay of the same stage_execution_id, whose
+            # UPDATE would otherwise miss `WHERE status='prepared'` and raise).
             return already
         cur = self.conn.execute(
             "UPDATE stage_executions SET status = 'accepted', data = ? "
@@ -561,8 +564,15 @@ class SqliteStageExecutionRepository:
         at: datetime,
         failure_code: FailureCode | None = None,
     ) -> StageExecution:
-        """Move a record to REJECTED / FAILED / SUPERSEDED (task 3.4)."""
+        """Move a record to REJECTED / FAILED / SUPERSEDED (task 3.4).
 
+        ACCEPTED must go through :meth:`accept` (CAS) so the one-accepted
+        invariant stays enforced; rejecting it here prevents an accidental
+        ``save`` from colliding with the ``ux_stage_exec_accepted`` index.
+        """
+
+        if status is StageStatus.ACCEPTED:
+            raise ValueError("use accept() for ACCEPTED transitions")
         current = self.get(stage_execution_id)
         if current is None:
             raise KeyError(stage_execution_id)
