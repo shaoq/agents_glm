@@ -104,16 +104,16 @@
 
 ## 9. Composition Root and Provider Wiring
 
-- [ ] 9.1 Define a composition configuration that distinguishes deterministic Fake and production profiles
-- [ ] 9.2 Build the deterministic offline composition with all required phase ports and role handlers
-- [ ] 9.3 Add composition tests proving the offline profile imports and calls no live network stack
+- [x] 9.1 Define a composition configuration that distinguishes deterministic Fake and production profiles
+- [x] 9.2 Build the deterministic offline composition with all required phase ports and role handlers
+- [x] 9.3 Add composition tests proving the offline profile imports and calls no live network stack
 - [ ] 9.4 Build production composition for Model, Memory, RAG, and optional Web adapters
 - [ ] 9.5 Wire GoalNormalizer and Planner to configured model profiles through proposal-only ports
-- [ ] 9.6 Wire EvidenceResearcher, Analyst, ReportWriter, and ReportReviewer to role-specific handlers
-- [ ] 9.7 Wire Plan, Replan, Evidence Join, Gate, Completion, Report, Finalizer, Task Runtime, and RunCoordinator
+- [x] 9.6 Wire EvidenceResearcher, Analyst, ReportWriter, and ReportReviewer to role-specific handlers
+- [x] 9.7 Wire Plan, Replan, Evidence Join, Gate, Completion, Report, Finalizer, Task Runtime, and RunCoordinator
 - [ ] 9.8 Reject incomplete production composition instead of silently falling back to Fake providers
 - [ ] 9.9 Add secret-safe capability and composition diagnostics
-- [ ] 9.10 Verify all Capability calls still pass through Worker permissions, Run Policy, and Capability Router
+- [x] 9.10 Verify all Capability calls still pass through Worker permissions, Run Policy, and Capability Router
 
 ## 10. Application Service, CLI, and Watch
 
