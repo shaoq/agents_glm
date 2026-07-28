@@ -64,5 +64,67 @@ class OpenAIModelAdapter(AsyncCapabilityAdapter):
         tokens = int(getattr(getattr(response, "usage", None), "total_tokens", 0) or 0)
         return text, tokens
 
+    async def invoke_tools(
+        self, request: CapabilityRequest, tools: list[dict]
+    ) -> CapabilityResult:
+        """Function-calling mode: pass tool definitions, parse the first tool_call.
+
+        Returns ``CapabilityResult.data = {"tool_name", "arguments"}`` where
+        ``arguments`` is the raw JSON string from the model (callers validate via
+        Pydantic). Plain-text :meth:`invoke` is retained for long-form output.
+        """
+
+        op = f"op::{request.request_id}"
+        prompt = str(request.inputs.get("prompt", ""))
+        try:
+            name, args, tokens = await self._complete_with_tools(prompt, tools)
+        except TimeoutError:
+            return CapabilityResult.failed(
+                operation_id=op, failure_code=FailureCode.TIMEOUT, retryable=True
+            )
+        except Exception:  # noqa: BLE001 - retry-safe diagnostics, secret never logged
+            return CapabilityResult.failed(
+                operation_id=op, failure_code=FailureCode.UPSTREAM_ERROR, retryable=True
+            )
+        if not name:
+            # Model returned no tool call -> treat as invalid (non-retryable) so the
+            # phase degrades to IDLE rather than silently fabricating an output.
+            return CapabilityResult.failed(
+                operation_id=op, failure_code=FailureCode.INVALID_RESPONSE, retryable=False
+            )
+        return CapabilityResult.ok(
+            operation_id=op,
+            data={"tool_name": name, "arguments": args or ""},
+            source=SourceIdentity(
+                source_id=f"model:{self.profile.name}", source_kind=SourceKind.MODEL
+            ),
+            usage=Usage(tokens=tokens),
+        )
+
+    async def _complete_with_tools(
+        self, prompt: str, tools: list[dict]
+    ) -> tuple[str | None, str | None, int]:
+        import openai  # lazy: not required at package import time
+
+        client = openai.OpenAI(
+            api_key=self.profile.api_key,
+            base_url=self.profile.base_url,
+            timeout=self.profile.timeout_seconds,
+        )
+        response = await to_async(
+            client.chat.completions.create,
+            model=self.profile.name,
+            messages=[{"role": "user", "content": prompt}],
+            tools=tools,
+            tool_choice="auto",
+        )
+        msg = response.choices[0].message
+        tokens = int(getattr(getattr(response, "usage", None), "total_tokens", 0) or 0)
+        tool_calls = getattr(msg, "tool_calls", None)
+        if not tool_calls:
+            return None, None, tokens
+        first = tool_calls[0]
+        return first.function.name, first.function.arguments, tokens
+
 
 __all__ = ["OpenAIModelAdapter", "ModelProfile"]

@@ -1,9 +1,9 @@
 ## 1. Function-Calling Model Adapter
 
-- [ ] 1.1 Extend `OpenAIModelAdapter` with `invoke_tools(request, tools)`: pass `tools` to `chat.completions.create`, parse `tool_calls[0]` into `CapabilityResult.data={"tool_name", "arguments"}`, preserve usage/timing; keep plain-text `invoke` for long-form output
-- [ ] 1.2 Handle `tools`-mode failure paths (no tool_call / empty arguments / provider error) → `CapabilityResult.failed(retryable=True)`; never raise
-- [ ] 1.3 Add a JSON-schema helper that derives a tool definition from a Pydantic model (name + description + `parameters` from `model.model_json_schema()`)
-- [ ] 1.4 Unit-test `invoke_tools` with a stubbed OpenAI client (tool_call present / absent / malformed); assert secret is not in `CapabilityResult`
+- [x] 1.1 Extend `OpenAIModelAdapter` with `invoke_tools(request, tools)`: pass `tools` to `chat.completions.create`, parse `tool_calls[0]` into `CapabilityResult.data={"tool_name", "arguments"}`, preserve usage/timing; keep plain-text `invoke` for long-form output
+- [x] 1.2 Handle `tools`-mode failure paths (no tool_call / empty arguments / provider error) → `CapabilityResult.failed(retryable=True)`; never raise
+- [x] 1.3 Add a JSON-schema helper that derives a tool definition from a Pydantic model (name + description + `parameters` from `model.model_json_schema()`)
+- [x] 1.4 Unit-test `invoke_tools` with a stubbed OpenAI client (tool_call present / absent / malformed); assert secret is not in `CapabilityResult`
 
 ## 2. Accepted-Evidence Persistence
 
