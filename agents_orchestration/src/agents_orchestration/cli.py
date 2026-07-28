@@ -122,15 +122,16 @@ def run_pause(
 def run_resume(
     run_id: Annotated[str, typer.Argument()],
     expected_version: Annotated[int, typer.Option("--expected-version")],
-    target: Annotated[str, typer.Option("--target")] = "researching",
 ) -> None:
-    from agents_orchestration.domain.enums import RunState
-
-    _mutate(
-        lambda svc: svc.resume_run(
-            run_id, expected_version=expected_version, target=RunState(target)
-        )
-    )
+    # task 10.12: no arbitrary --target; resume restores the persisted
+    # continuation (paused_from_state) and drives to terminal/blocked.
+    svc = _service()
+    try:
+        run = asyncio.run(svc.resume_and_drive(run_id, expected_version=expected_version))
+        typer.echo(run.model_dump_json())
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(_diagnostic(exc), err=True)
+        raise typer.Exit(code=_exit_for(exc)) from None
 
 
 @run_app.command("cancel")

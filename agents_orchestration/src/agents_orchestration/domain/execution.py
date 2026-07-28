@@ -57,6 +57,7 @@ class Run(BaseModel):
     replan_count: int = Field(default=0, ge=0)
     revision_count: int = Field(default=0, ge=0)
     termination: TerminationReason | None = None
+    paused_from_state: RunState | None = None
     state_version: int = Field(default=1, ge=1)
     created_at: datetime
     updated_at: datetime

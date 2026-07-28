@@ -96,11 +96,11 @@
 - [x] 8.5 Implement deterministic continuation application during Gate consumption
 - [x] 8.6 Implement GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW continuations
 - [x] 8.7 Add tests proving callers cannot supply an arbitrary post-Gate target state
-- [ ] 8.8 Add Pause continuation tests for every resumable outer phase
-- [ ] 8.9 Persist the safe phase continuation when Pause is accepted
-- [ ] 8.10 Replace arbitrary resume target selection with persisted continuation restoration
-- [ ] 8.11 Implement resume-and-drive behavior until the next explicit block or terminal state
-- [ ] 8.12 Add Gate expiry tests for fail, cancel, partial, default, and escalate actions
+- [x] 8.8 Add Pause continuation tests for every resumable outer phase
+- [x] 8.9 Persist the safe phase continuation when Pause is accepted
+- [x] 8.10 Replace arbitrary resume target selection with persisted continuation restoration
+- [x] 8.11 Implement resume-and-drive behavior until the next explicit block or terminal state
+- [x] 8.12 Add Gate expiry tests for fail, cancel, partial, default, and escalate actions
 
 ## 9. Composition Root and Provider Wiring
 
@@ -128,7 +128,7 @@
 - [ ] 10.9 Make `--follow` control event presentation without changing execution semantics
 - [x] 10.10 Route `runtime tick RUN_ID` to one bounded RunCoordinator advance
 - [x] 10.11 Route selected and global `runtime watch` through coordinator-backed Watch
-- [ ] 10.12 Remove CLI arbitrary `run resume --target` and use resume_and_drive continuation semantics
+- [x] 10.12 Remove CLI arbitrary `run resume --target` and use resume_and_drive continuation semantics
 - [x] 10.13 Return the freshly loaded final or blocked Run view rather than the pre-drive creation snapshot
 - [x] 10.14 Add stable JSON and human-readable output for AdvanceReport, Gate block, and terminal results
 

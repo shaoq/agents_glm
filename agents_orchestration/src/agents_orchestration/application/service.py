@@ -148,7 +148,22 @@ class OrchestrationService:
             return uow.runs.get(run_id)
 
     def pause_run(self, run_id: str, *, expected_version: int) -> Run:
-        return self._transition(run_id, RunState.PAUSED, expected_version)
+        """Transition to PAUSED and persist the safe continuation point (the
+        phase the Run was paused from) so resume restores it deterministically
+        rather than from a caller-supplied target (tasks 8.8/8.9)."""
+
+        with self.backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            if run is None:
+                raise KeyError(run_id)
+            if run.state_version != expected_version:
+                raise StaleVersionError(f"run {run_id} expected {expected_version}")
+            paused = run.transition(RunState.PAUSED, self.backend.clock.now()).model_copy(
+                update={"paused_from_state": run.state}
+            )
+            uow.runs.save(paused, expected_version=run.state_version)
+            uow.commit()
+            return paused
 
     def resume_run(self, run_id: str, *, expected_version: int, target: RunState) -> Run:
         return self._transition(run_id, target, expected_version)
@@ -225,6 +240,30 @@ class OrchestrationService:
         result = self.get_run(run.run_id)
         if result is None:  # defensive: the run should not disappear mid-drive
             raise RuntimeError(f"run {run.run_id} disappeared after drive")
+        return result
+
+    async def resume_and_drive(self, run_id: str, *, expected_version: int) -> Run:
+        """Resume a paused Run from its persisted continuation (the phase it was
+        paused from) and drive to terminal/blocked (tasks 8.10/8.11). The target
+        comes solely from ``paused_from_state`` — callers cannot choose it.
+        """
+
+        with self.backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            if run is None:
+                raise KeyError(run_id)
+            if run.state is not RunState.PAUSED:
+                raise RuntimeError(f"run {run_id} is not paused (state={run.state.value})")
+            if run.state_version != expected_version:
+                raise StaleVersionError(f"run {run_id} expected {expected_version}")
+            origin = run.paused_from_state or RunState.NORMALIZING
+            resumed = run.transition(origin, self.backend.clock.now())
+            uow.runs.save(resumed, expected_version=run.state_version)
+            uow.commit()
+        await self.drive_run(run_id)
+        result = self.get_run(run_id)
+        if result is None:
+            raise RuntimeError(f"run {run_id} disappeared after resume")
         return result
 
     async def drive_run_legacy(self, run_id: str, *, max_ticks: int = 1000):
