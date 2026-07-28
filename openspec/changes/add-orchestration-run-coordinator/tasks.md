@@ -148,12 +148,12 @@
 
 - [x] 12.1 Replace the manual happy-path E2E with a public start_and_drive Goal-to-artifacts test
 - [x] 12.2 Assert the happy-path E2E directly invokes no PlanAcceptor, ReplanService, ReportBuilder, or Finalizer
-- [ ] 12.3 Add public-boundary E2E for all four Gate types and stored continuation
-- [ ] 12.4 Add public-boundary E2E for focused Replan and report revision
+- [x] 12.3 Add public-boundary E2E for all four Gate types and stored continuation
+- [x] 12.4 Add public-boundary E2E for focused Replan and report revision
 - [x] 12.5 Add public-boundary E2E for Pause/Resume and process restart at semantic checkpoints
-- [ ] 12.6 Add public-boundary E2E for provider degradation, deadline, budget, cancellation, and partial/failure delivery
+- [x] 12.6 Add public-boundary E2E for provider degradation, deadline, budget, cancellation, and partial/failure delivery
 - [x] 12.7 Verify `report.md`, `report.json`, and `run-summary.json` content hashes and disclosure fields
-- [ ] 12.8 Add security tests for prompt injection, unregistered write capabilities, secret redaction, and export boundaries
+- [x] 12.8 Add security tests for prompt injection, unregistered write capabilities, secret redaction, and export boundaries
 - [x] 12.9 Update README execution semantics, Python API examples, Runtime commands, Gate resume, and recovery guidance
 - [x] 12.10 Update the architecture design status and diagrams to include RunCoordinator above TaskRuntimeTick
 - [x] 12.11 Run Ruff, unit, integration, architecture, contract, E2E, and coverage suites
