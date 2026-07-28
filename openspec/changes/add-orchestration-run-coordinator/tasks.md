@@ -73,19 +73,19 @@
 
 ## 7. Analyze, Write, Review, and Finalize Phases
 
-- [ ] 7.1 Implement role-specific Analyst, ReportWriter, and ReportReviewer handler contracts
-- [ ] 7.2 Add Analysis phase tests for evidence binding, unsupported claims, retry, and focused research fallback
-- [ ] 7.3 Implement Analysis phase acceptance and immutable AnalysisArtifact persistence
-- [ ] 7.4 Add Writing phase tests for current analysis binding, citation structure, and immutable draft revision
-- [ ] 7.5 Implement Writing phase acceptance and Report Draft artifact persistence
-- [ ] 7.6 Add Review phase tests for PASS, REVISE, RESEARCH_GAP, CONFLICT, and ESCALATE
-- [ ] 7.7 Implement deterministic Reviewer verdict mapping through Run Policy
-- [ ] 7.8 Implement monotonic revision and Replan counters without reset across phase transitions
-- [ ] 7.9 Add tests for exhausted revision/Replan bounds selecting partial, fail, or escalation policy
-- [ ] 7.10 Add Finalizing tests for completion, citations, required Tasks, conflicts, pending Attempts, and stale candidate versions
-- [ ] 7.11 Implement Finalizing phase using CompletionEvaluator, CitationValidator, ReportBuilder, and Finalizer
-- [ ] 7.12 Atomically bind final artifact hashes, final Checkpoint, termination reason, and terminal Run state
-- [ ] 7.13 Verify partial delivery discloses unmet criteria, missing sources, unresolved conflicts, and degradation
+- [x] 7.1 Implement role-specific Analyst, ReportWriter, and ReportReviewer handler contracts
+- [x] 7.2 Add Analysis phase tests for evidence binding, unsupported claims, retry, and focused research fallback
+- [x] 7.3 Implement Analysis phase acceptance and immutable AnalysisArtifact persistence
+- [x] 7.4 Add Writing phase tests for current analysis binding, citation structure, and immutable draft revision
+- [x] 7.5 Implement Writing phase acceptance and Report Draft artifact persistence
+- [x] 7.6 Add Review phase tests for PASS, REVISE, RESEARCH_GAP, CONFLICT, and ESCALATE
+- [x] 7.7 Implement deterministic Reviewer verdict mapping through Run Policy
+- [x] 7.8 Implement monotonic revision and Replan counters without reset across phase transitions
+- [x] 7.9 Add tests for exhausted revision/Replan bounds selecting partial, fail, or escalation policy
+- [x] 7.10 Add Finalizing tests for completion, citations, required Tasks, conflicts, pending Attempts, and stale candidate versions
+- [x] 7.11 Implement Finalizing phase using CompletionEvaluator, CitationValidator, ReportBuilder, and Finalizer
+- [x] 7.12 Atomically bind final artifact hashes, final Checkpoint, termination reason, and terminal Run state
+- [x] 7.13 Verify partial delivery discloses unmet criteria, missing sources, unresolved conflicts, and degradation
 
 ## 8. Gate, Pause, and Continuation
 
