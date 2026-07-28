@@ -24,8 +24,9 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_orchestration.domain.artifact import ArtifactRef
-from agents_orchestration.domain.enums import FailureCode, RunState, WorkerRole
+from agents_orchestration.domain.enums import FailureCode, GateType, RunState, WorkerRole
 from agents_orchestration.domain.ids import RunId
+from agents_orchestration.domain.lifecycle import GateContinuation
 
 # --- Task 2.1 / 2.2: advance disposition + report --------------------------
 
@@ -295,10 +296,72 @@ def classify_phase_result(
     return PhaseResultClassification.STALE
 
 
+# --- Task 8.1 / 8.5 / 8.6: Gate continuation -------------------------------
+
+
+GATE_CONTINUATION_NEXT: dict[GateType, dict[str, str]] = {
+    GateType.GOAL_CLARIFICATION: {
+        "clarified": RunState.NORMALIZING.value,
+        "cancelled": RunState.CANCELED.value,
+    },
+    GateType.PLAN_APPROVAL: {
+        "approved": RunState.RESEARCHING.value,
+        "rejected": RunState.PLANNING.value,
+    },
+    GateType.CONFLICT_RESOLUTION: {
+        "resolved": RunState.RESEARCHING.value,
+        "escalated": RunState.FAILED.value,
+    },
+    GateType.FINAL_REVIEW: {
+        "approved": RunState.FINALIZING.value,
+        "changes": RunState.REVIEWING.value,
+    },
+}
+
+
+def build_gate_continuation(gate_type: GateType, run) -> GateContinuation:
+    """Construct the version-bound continuation for a Gate opened from ``run``'s
+    current phase (task 8.3 / 8.6)."""
+    phase = phase_for_state(run.state)
+    return GateContinuation(
+        origin_phase=phase.value if phase else run.state.value,
+        bound_state_version=run.state_version,
+        bound_plan_version=run.current_plan_version,
+        next_state_by_outcome=dict(GATE_CONTINUATION_NEXT.get(gate_type, {})),
+    )
+
+
+def apply_gate_continuation(gate, run, outcome: str, now):
+    """Deterministically apply the Gate's continuation (task 8.5).
+
+    Returns the possibly-transitioned Run. A Gate whose bound versions no
+    longer match the Run, or whose outcome has no mapping, advances nothing
+    (task 8.4 stale/unknown rejection). Callers never choose the target state
+    (task 8.7) — it comes solely from the persisted continuation.
+    """
+
+    from agents_orchestration.domain.state_machine import assert_run_transition
+
+    cont = gate.continuation
+    if cont is None:
+        return run
+    if cont.bound_state_version != run.state_version:
+        return run  # stale binding (task 8.4)
+    target = cont.next_state_for(outcome)
+    if target is None:
+        return run  # unknown outcome
+    target_state = RunState(target)
+    if target_state is run.state:
+        return run
+    assert_run_transition(run.state, target_state)
+    return run.transition(target_state, now)
+
+
 __all__ = [
     "AdvanceDisposition",
     "AdvanceReport",
     "CapturedVersions",
+    "GATE_CONTINUATION_NEXT",
     "InputFingerprint",
     "PHASE_FOR_STATE",
     "PHASE_ROLES",
@@ -307,6 +370,8 @@ __all__ = [
     "StageExecution",
     "StageStatus",
     "TaskTickSummary",
+    "apply_gate_continuation",
+    "build_gate_continuation",
     "classify_phase_result",
     "eligible_worker_roles",
     "phase_for_state",

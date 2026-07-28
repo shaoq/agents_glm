@@ -16,7 +16,7 @@ from datetime import timedelta
 from agents_orchestration.domain.enums import EffectType, GateType
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run
-from agents_orchestration.domain.lifecycle import CheckpointKind, Gate
+from agents_orchestration.domain.lifecycle import CheckpointKind, Gate, GateContinuation
 from agents_orchestration.domain.state_machine import assert_gate_consume, assert_gate_respond
 from agents_orchestration.runtime.core import CheckpointService
 
@@ -64,6 +64,7 @@ class GateService:
         ttl_seconds: int = 3600,
         artifact_hash: str | None = None,
         task_id: str | None = None,
+        continuation: GateContinuation | None = None,
     ) -> Gate:
         now = self.clock.now()
         gate = Gate(
@@ -79,6 +80,7 @@ class GateService:
             artifact_hash=artifact_hash,
             allowed_response_schema=allowed_response_schema,
             expires_at=now + timedelta(seconds=ttl_seconds),
+            continuation=continuation,
         )
         self.uow.gates.save(gate)
         event = self._event(run, EffectType.GATE_OPENED, now, gate=gate)

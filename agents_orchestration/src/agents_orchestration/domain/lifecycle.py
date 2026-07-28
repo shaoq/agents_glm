@@ -62,6 +62,29 @@ class Lease(BaseModel):
         return self.state is not LeaseState.EXPIRED and now >= self.expires_at
 
 
+class GateContinuation(BaseModel):
+    """Version-bound continuation: allowed response outcomes and the
+    deterministic next Run state for each (design Decision 9, task 8.1).
+
+    Consuming a Gate applies its continuation atomically; callers cannot supply
+    an arbitrary post-Gate target state (task 8.7). Outcomes and state values
+    are strings so this model stays in the low-level lifecycle layer without
+    importing coordination/enums cycles.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    origin_phase: str
+    bound_state_version: int
+    bound_plan_version: int | None = None
+    bound_contract_version: int | None = None
+    bound_artifact_hash: str | None = None
+    next_state_by_outcome: dict[str, str] = Field(default_factory=dict)
+
+    def next_state_for(self, outcome: str) -> str | None:
+        return self.next_state_by_outcome.get(outcome)
+
+
 class Gate(BaseModel):
     """A version-bound, single-use Human Gate (design Decision 11)."""
 
@@ -85,6 +108,7 @@ class Gate(BaseModel):
     responded_by: str | None = None
     responded_at: datetime | None = None
     consumed_at: datetime | None = None
+    continuation: GateContinuation | None = None
 
     @property
     def is_open(self) -> bool:

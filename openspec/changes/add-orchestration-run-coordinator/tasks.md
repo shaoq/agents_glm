@@ -89,13 +89,13 @@
 
 ## 8. Gate, Pause, and Continuation
 
-- [ ] 8.1 Add GateContinuation domain tests for origin phase, bound versions, outcomes, actions, and artifact hashes
-- [ ] 8.2 Extend Gate persistence and serialization with versioned continuation data
-- [ ] 8.3 Implement atomic Gate open plus continuation, Event, Outbox, and Checkpoint
-- [ ] 8.4 Add Gate response tests rejecting stale state, plan, contract, and artifact bindings
-- [ ] 8.5 Implement deterministic continuation application during Gate consumption
-- [ ] 8.6 Implement GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW continuations
-- [ ] 8.7 Add tests proving callers cannot supply an arbitrary post-Gate target state
+- [x] 8.1 Add GateContinuation domain tests for origin phase, bound versions, outcomes, actions, and artifact hashes
+- [x] 8.2 Extend Gate persistence and serialization with versioned continuation data
+- [x] 8.3 Implement atomic Gate open plus continuation, Event, Outbox, and Checkpoint
+- [x] 8.4 Add Gate response tests rejecting stale state, plan, contract, and artifact bindings
+- [x] 8.5 Implement deterministic continuation application during Gate consumption
+- [x] 8.6 Implement GOAL_CLARIFICATION, PLAN_APPROVAL, CONFLICT_RESOLUTION, and FINAL_REVIEW continuations
+- [x] 8.7 Add tests proving callers cannot supply an arbitrary post-Gate target state
 - [ ] 8.8 Add Pause continuation tests for every resumable outer phase
 - [ ] 8.9 Persist the safe phase continuation when Pause is accepted
 - [ ] 8.10 Replace arbitrary resume target selection with persisted continuation restoration

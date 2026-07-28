@@ -29,6 +29,7 @@ from agents_orchestration.domain.coordination import (
     StageExecution,
     StageStatus,
     TaskTickSummary,
+    build_gate_continuation,
     classify_phase_result,
     phase_for_state,
     stage_idempotency_key,
@@ -290,10 +291,11 @@ class RunCoordinator:
     def _open_gate(self, uow, run, outcome) -> None:
         from agents_orchestration.orchestration.gates import GateService
 
+        cont = build_gate_continuation(outcome.open_gate, run)
         GateService(uow, self.backend.clock, self.backend.idgen).open(
             run, outcome.open_gate,
             actor="system", role="orchestrator", scope=run.run_id,
-            allowed_response_schema="{}",
+            allowed_response_schema="{}", continuation=cont,
         )
 
     # --- stage / event / checkpoint helpers ----------------------------------
