@@ -33,16 +33,16 @@
 
 ## 4. RunCoordinator Core
 
-- [ ] 4.1 Add a failing test for CREATED → NORMALIZING as one bounded coordinator advance
-- [ ] 4.2 Implement the RunCoordinator dispatcher with injected phase handlers
-- [ ] 4.3 Implement CREATED, terminal, paused, and open-Gate short-circuit behavior
-- [ ] 4.4 Add tests proving one advance cannot execute more than one semantic phase
-- [ ] 4.5 Implement prepare/execute/accept orchestration without provider calls in write transactions
-- [ ] 4.6 Add tests for stale phase results becoming observations without advancing the Run
-- [ ] 4.7 Implement stage Event and semantic Checkpoint creation in the acceptance transaction
-- [ ] 4.8 Add tests distinguishing IDLE from BLOCKED when no Task is dispatched
-- [ ] 4.9 Apply deadline, token, cost, Replan, revision, and cancellation guards before every phase step
-- [ ] 4.10 Add structured, redacted coordinator diagnostics for validation, policy, recovery, and terminal errors
+- [x] 4.1 Add a failing test for CREATED → NORMALIZING as one bounded coordinator advance
+- [x] 4.2 Implement the RunCoordinator dispatcher with injected phase handlers
+- [x] 4.3 Implement CREATED, terminal, paused, and open-Gate short-circuit behavior
+- [x] 4.4 Add tests proving one advance cannot execute more than one semantic phase
+- [x] 4.5 Implement prepare/execute/accept orchestration without provider calls in write transactions
+- [x] 4.6 Add tests for stale phase results becoming observations without advancing the Run
+- [x] 4.7 Implement stage Event and semantic Checkpoint creation in the acceptance transaction
+- [x] 4.8 Add tests distinguishing IDLE from BLOCKED when no Task is dispatched
+- [x] 4.9 Apply deadline, token, cost, Replan, revision, and cancellation guards before every phase step
+- [x] 4.10 Add structured, redacted coordinator diagnostics for validation, policy, recovery, and terminal errors
 
 ## 5. Goal and Planning Phases
 
