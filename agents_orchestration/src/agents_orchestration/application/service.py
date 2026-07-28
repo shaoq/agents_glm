@@ -16,10 +16,12 @@ from agents_orchestration.capabilities.registry import CapabilityRegistry
 from agents_orchestration.capabilities.router import CapabilityRouter
 from agents_orchestration.domain.artifact import ArtifactRef
 from agents_orchestration.domain.capability import CapabilityRequest
+from agents_orchestration.domain.coordination import AdvanceDisposition, AdvanceReport
 from agents_orchestration.domain.enums import RunState, TerminationReason, WorkerRole
 from agents_orchestration.domain.execution import Attempt, Run, Task
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
+from agents_orchestration.orchestration.composition import build_offline_coordinator
 from agents_orchestration.runtime.ports import OrphanArtifactError, StaleVersionError
 from agents_orchestration.runtime.tick import RuntimeTick
 from agents_orchestration.runtime.watch import RuntimeWatch
@@ -107,6 +109,7 @@ class OrchestrationService:
         handler = DefaultWorkerHandler(self.capability_registry, backend.idgen)
         self._handlers = {role: handler for role in WorkerRole}
         self._executor = WorkerExecutor(self.workers, self.router, self._handlers, self.run_policy)
+        self._coordinator = None
 
     # --- 11.1 / 11.2 run lifecycle -------------------------------------------
 
@@ -180,7 +183,48 @@ class OrchestrationService:
         _ = run_id
         return RuntimeTick(self.backend, executor=self._executor, limits=self.limits)
 
-    async def drive_run(self, run_id: str, *, max_ticks: int = 1000):
+    async def drive_run(self, run_id: str, *, max_advances: int = 1000) -> AdvanceReport:
+        """Loop RunCoordinator advances until the Run is terminal or explicitly
+        blocked (task 10.4). Unlike the legacy Watch, a zero-dispatch tick no
+        longer counts as blocked — IDLE phases (Goal/Plan/Finalize) progress."""
+
+        last = await self.coordinator.advance(run_id)
+        for _ in range(max_advances - 1):
+            if last.disposition in (AdvanceDisposition.TERMINAL, AdvanceDisposition.BLOCKED):
+                break
+            last = await self.coordinator.advance(run_id)
+        return last
+
+    # --- coordinator-backed public operations (tasks 10.2-10.4) -------------
+
+    @property
+    def coordinator(self):
+        if self._coordinator is None:
+            self._coordinator = build_offline_coordinator(self.backend)
+        return self._coordinator
+
+    def create_run(self, raw_goal: str, *, request_id: str) -> Run:
+        """Persist a CREATED Run only — no normalization, planning, or driving
+        (task 10.3). Idempotent by Request ID like ``start_run``."""
+
+        return self.start_run(raw_goal, request_id=request_id, state=RunState.CREATED)
+
+    async def advance_run(self, run_id: str) -> AdvanceReport:
+        """One bounded RunCoordinator advance (task 10.1)."""
+
+        return await self.coordinator.advance(run_id)
+
+    async def start_and_drive(self, raw_goal: str, *, request_id: str) -> Run:
+        """Create-and-drive: persist a CREATED Run, drive the coordinator until
+        terminal or blocked, return the freshly loaded Run view (task 10.4)."""
+
+        run = self.create_run(raw_goal, request_id=request_id)
+        await self.drive_run(run.run_id)
+        return self.get_run(run.run_id)
+
+    async def drive_run_legacy(self, run_id: str, *, max_ticks: int = 1000):
+        """Deprecated Watch-based drive retained for compatibility (task 10.5)."""
+
         return await RuntimeWatch(self.backend, self.tick(run_id)).drive_run(
             run_id, max_ticks=max_ticks
         )

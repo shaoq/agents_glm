@@ -117,20 +117,20 @@
 
 ## 10. Application Service, CLI, and Watch
 
-- [ ] 10.1 Add application tests for create_run, start_and_drive, advance_run, drive_run, and resume_and_drive
+- [x] 10.1 Add application tests for create_run, start_and_drive, advance_run, drive_run, and resume_and_drive
 - [ ] 10.2 Implement typed StartRunCommand and structured start/drive results
-- [ ] 10.3 Implement create_run as idempotent CREATED-only persistence
-- [ ] 10.4 Implement start_and_drive over create_run plus coordinator-backed drive_run
+- [x] 10.3 Implement create_run as idempotent CREATED-only persistence
+- [x] 10.4 Implement start_and_drive over create_run plus coordinator-backed drive_run
 - [ ] 10.5 Preserve the legacy synchronous start_run creation behavior with a documented deprecation warning
-- [ ] 10.6 Change RuntimeWatch to loop RunCoordinator advances and honor PROGRESSED/BLOCKED/IDLE/TERMINAL
+- [x] 10.6 Change RuntimeWatch to loop RunCoordinator advances and honor PROGRESSED/BLOCKED/IDLE/TERMINAL
 - [ ] 10.7 Add Watch tests for non-Task phases, open Gates, idle polling, cancellation, maximum advances, and terminal Runs
-- [ ] 10.8 Route `run start` to start_and_drive and `--create-only` to create_run
+- [x] 10.8 Route `run start` to start_and_drive and `--create-only` to create_run
 - [ ] 10.9 Make `--follow` control event presentation without changing execution semantics
-- [ ] 10.10 Route `runtime tick RUN_ID` to one bounded RunCoordinator advance
-- [ ] 10.11 Route selected and global `runtime watch` through coordinator-backed Watch
+- [x] 10.10 Route `runtime tick RUN_ID` to one bounded RunCoordinator advance
+- [x] 10.11 Route selected and global `runtime watch` through coordinator-backed Watch
 - [ ] 10.12 Remove CLI arbitrary `run resume --target` and use resume_and_drive continuation semantics
-- [ ] 10.13 Return the freshly loaded final or blocked Run view rather than the pre-drive creation snapshot
-- [ ] 10.14 Add stable JSON and human-readable output for AdvanceReport, Gate block, and terminal results
+- [x] 10.13 Return the freshly loaded final or blocked Run view rather than the pre-drive creation snapshot
+- [x] 10.14 Add stable JSON and human-readable output for AdvanceReport, Gate block, and terminal results
 
 ## 11. Recovery and Compatibility
 

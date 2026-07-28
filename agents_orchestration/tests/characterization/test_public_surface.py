@@ -127,15 +127,6 @@ def test_cli_unknown_run_returns_404(runner: CliRunner, patched: OrchestrationSe
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "RunCoordinator not yet wired (Ch.4-7): no public path drives "
-        "Goal→Plan→Research→Analyze→Write→Review→Finalize, so a clear goal "
-        "cannot reach SUCCEEDED or produce report artifacts. Remove the xfail "
-        "once start_and_drive completes a clear goal end to end."
-    ),
-    strict=False,
-)
 @pytest.mark.unit
 def test_clear_goal_completes_to_artifacts_via_public_drive(
     service: OrchestrationService,

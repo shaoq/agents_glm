@@ -77,12 +77,12 @@ def run_start(
 ) -> None:
     svc = _service()
     try:
-        run = svc.start_run(goal, request_id=request_id)
         if create_only:
-            typer.echo(run.model_dump_json())
-            return
-        if follow:
-            asyncio.run(svc.drive_run(run.run_id))
+            run = svc.create_run(goal, request_id=request_id)
+        else:
+            # task 10.8: run start creates-and-drives; --follow only changes
+            # event presentation, not execution semantics (task 10.9).
+            run = asyncio.run(svc.start_and_drive(goal, request_id=request_id))
         typer.echo(run.model_dump_json())
     except Exception as exc:  # noqa: BLE001 - stable CLI error mapping
         typer.echo(_diagnostic(exc), err=True)
@@ -104,11 +104,7 @@ def run_watch(run_id: Annotated[str, typer.Argument()]) -> None:
     svc = _service()
     try:
         report = asyncio.run(svc.drive_run(run_id))
-        typer.echo(
-            json.dumps(
-                {"ticks": report.ticks, "terminal": report.terminal, "blocked": report.blocked}
-            )
-        )
+        typer.echo(_advance_json(report))
     except Exception as exc:  # noqa: BLE001
         typer.echo(_diagnostic(exc), err=True)
         raise typer.Exit(code=_exit_for(exc)) from None
@@ -222,8 +218,9 @@ def capability_doctor() -> None:
 def runtime_tick(run_id: Annotated[str, typer.Argument()]) -> None:
     svc = _service()
     try:
-        report = asyncio.run(svc.tick(run_id).tick(run_id))
-        typer.echo(json.dumps({"dispatched": report.dispatched, "accepted": report.accepted}))
+        # task 10.10: runtime tick is one bounded RunCoordinator advance.
+        report = asyncio.run(svc.advance_run(run_id))
+        typer.echo(_advance_json(report))
     except Exception as exc:  # noqa: BLE001
         typer.echo(_diagnostic(exc), err=True)
         raise typer.Exit(code=_exit_for(exc)) from None
@@ -243,23 +240,40 @@ def runtime_watch(
             reports = asyncio.run(_drive_all(svc))
             typer.echo(json.dumps(reports, ensure_ascii=False))
         else:
+            # task 10.11: runtime watch loops RunCoordinator advances.
             report = asyncio.run(svc.drive_run(run_id))
-            typer.echo(
-                json.dumps(
-                    {"ticks": report.ticks, "terminal": report.terminal, "blocked": report.blocked}
-                )
-            )
+            typer.echo(_advance_json(report))
     except Exception as exc:  # noqa: BLE001
         typer.echo(_diagnostic(exc), err=True)
         raise typer.Exit(code=_exit_for(exc)) from None
 
 
-async def _drive_all(svc: OrchestrationService) -> dict:
-    from agents_orchestration.runtime.watch import RuntimeWatch
+def _advance_json(report) -> str:
+    """Stable JSON for an AdvanceReport (task 10.14)."""
 
-    watch = RuntimeWatch(svc.backend, svc.tick(""))
-    reports = await watch.drive_all()
-    return {rid: {"ticks": r.ticks, "terminal": r.terminal} for rid, r in reports.items()}
+    return json.dumps(
+        {
+            "disposition": report.disposition.value,
+            "from_state": report.from_state.value,
+            "to_state": report.to_state.value,
+            "state_version": report.state_version,
+            "reason": report.reason,
+        },
+        ensure_ascii=False,
+    )
+
+
+async def _drive_all(svc: OrchestrationService) -> dict:
+    with svc.backend.unit_of_work() as uow:
+        run_ids = [run.run_id for run in uow.runs.list_resumable()]
+    out: dict[str, dict] = {}
+    for rid in run_ids:
+        report = await svc.drive_run(rid)
+        out[rid] = {
+            "disposition": report.disposition.value,
+            "to_state": report.to_state.value,
+        }
+    return out
 
 
 if __name__ == "__main__":  # pragma: no cover

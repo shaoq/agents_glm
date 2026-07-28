@@ -10,7 +10,6 @@ from typer.testing import CliRunner
 
 from agents_orchestration import cli as cli_mod
 from agents_orchestration.application.service import OrchestrationService
-from agents_orchestration.domain.enums import CapabilityKind, RunState, WorkerRole
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
 
 
@@ -115,42 +114,26 @@ def test_runtime_tick_requires_run_id(runner, patched) -> None:
 
 
 @pytest.mark.unit
-def test_runtime_tick_with_run_id_dispatches(runner, patched) -> None:
-    from agents_orchestration.domain.execution import Task
-    from agents_orchestration.domain.plan import Plan, PlanGraph
-
+def test_runtime_tick_advances_one_bounded_step(runner, patched) -> None:
     started = runner.invoke(
         cli_mod.app, ["run", "start", "--goal", "X", "--request-id", "r3", "--create-only"]
     )
     run_id = json.loads(started.stdout)["run_id"]
-    # Seed a RESEARCHING run with a plan + task so the tick has ready work.
-    with patched.backend.unit_of_work() as uow:
-        run = uow.runs.get(run_id)
-        researching = run.model_copy(
-            update={"state": RunState.RESEARCHING, "current_plan_version": 1}
-        )
-        uow.runs.save(researching, expected_version=run.state_version)
-        now = patched.backend.clock.now()
-        uow.plans.save(
-            Plan(run_id=run_id, graph=PlanGraph(plan_id="p1", version=1), proposed_at=now)
-        )
-        uow.tasks.materialize(
-            [
-                Task(
-                    task_id="t1",
-                    run_id=run_id,
-                    plan_version=1,
-                    worker_role=WorkerRole.EVIDENCE_RESEARCHER,
-                    required_capabilities=(CapabilityKind.RAG_SEARCH,),
-                    created_at=now,
-                    updated_at=now,
-                )
-            ]
-        )
-        uow.commit()
     result = runner.invoke(cli_mod.app, ["runtime", "tick", run_id])
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["dispatched"] == 1
+    payload = json.loads(result.stdout)
+    assert payload["disposition"] == "progressed"  # CREATED -> NORMALIZING
+    assert payload["to_state"] == "normalizing"
+
+
+@pytest.mark.unit
+def test_run_start_drives_to_succeeded(runner, patched) -> None:
+    result = runner.invoke(
+        cli_mod.app, ["run", "start", "--goal", "clear goal", "--request-id", "r4"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["state"] == "succeeded"
 
 
 # --- 11.11 CLI delegates to Application (no duplicated domain logic) --------
