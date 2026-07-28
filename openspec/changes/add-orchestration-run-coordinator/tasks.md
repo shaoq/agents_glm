@@ -135,14 +135,14 @@
 ## 11. Recovery and Compatibility
 
 - [ ] 11.1 Define recovery rules for each Run phase and StageExecution status
-- [ ] 11.2 Add restart tests before prepare, after prepare, after provider return, after acceptance, and after transition
-- [ ] 11.3 Implement accepted stage result reuse by logical key and input fingerprint
+- [x] 11.2 Add restart tests before prepare, after prepare, after provider return, after acceptance, and after transition
+- [x] 11.3 Implement accepted stage result reuse by logical key and input fingerprint
 - [ ] 11.4 Implement recovery handling for PREPARED executions with unknown external outcomes
 - [ ] 11.5 Reconstruct lazy stage records for legacy non-terminal Runs from Run, Plan, Task, Gate, and Artifact state
-- [ ] 11.6 Add compatibility tests for legacy databases and the deprecated Python start_run signature
-- [ ] 11.7 Add tests proving restart never duplicates accepted final artifacts or Task results
-- [ ] 11.8 Verify global Watch resumes every eligible Run through the coordinator without changing paused or gated Runs
-- [ ] 11.9 Document rollback routing and verify additive migrations do not prevent the prior binary from reading core Run data
+- [x] 11.6 Add compatibility tests for legacy databases and the deprecated Python start_run signature
+- [x] 11.7 Add tests proving restart never duplicates accepted final artifacts or Task results
+- [x] 11.8 Verify global Watch resumes every eligible Run through the coordinator without changing paused or gated Runs
+- [x] 11.9 Document rollback routing and verify additive migrations do not prevent the prior binary from reading core Run data
 
 ## 12. Public-boundary E2E, Security, and Documentation
 
