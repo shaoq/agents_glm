@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from agents_orchestration.domain.coordination import eligible_worker_roles
 from agents_orchestration.domain.enums import (
     AttemptAcceptance,
     AttemptState,
@@ -121,6 +122,10 @@ class RuntimeTick:
 
             scheduler = Scheduler(uow)
             ready = scheduler.ready_work(run, max_concurrency=run.policy.max_concurrency)
+            eligible = eligible_worker_roles(run.state)
+            if eligible is not None:
+                # task 6.2 / 6.4: only the current phase's Worker roles may dispatch
+                ready = [t for t in ready if t.worker_role in eligible]
             if not ready:
                 return TickReport(run_id, blocked=self._has_in_flight(uow, run.run_id))
 

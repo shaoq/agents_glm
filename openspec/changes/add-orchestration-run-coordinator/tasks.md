@@ -59,16 +59,16 @@
 
 ## 6. Phase-aware Task Runtime and Research Join
 
-- [ ] 6.1 Add scheduler tests mapping Run phases to eligible Worker roles
-- [ ] 6.2 Implement phase-role filtering for Task readiness and dispatch
-- [ ] 6.3 Preserve existing Attempt, Lease, retry, fencing, budget, and late-result behavior under filtering
-- [ ] 6.4 Add tests proving later-stage Tasks cannot dispatch during RESEARCHING
-- [ ] 6.5 Add tests for required phase Tasks succeeded, failed, in flight, skipped, and superseded
-- [ ] 6.6 Implement phase completion detection for the active Plan version
-- [ ] 6.7 Add Research phase tests for independent branch success, partial failure, conflict, and insufficient evidence
-- [ ] 6.8 Implement accepted research result loading and deterministic Evidence Join
-- [ ] 6.9 Persist the EvidenceSet as an immutable stage output bound to active Plan and Attempt results
-- [ ] 6.10 Implement Research outcomes for ANALYZING, focused Replan, conflict Gate, degradation, and failure
+- [x] 6.1 Add scheduler tests mapping Run phases to eligible Worker roles
+- [x] 6.2 Implement phase-role filtering for Task readiness and dispatch
+- [x] 6.3 Preserve existing Attempt, Lease, retry, fencing, budget, and late-result behavior under filtering
+- [x] 6.4 Add tests proving later-stage Tasks cannot dispatch during RESEARCHING
+- [x] 6.5 Add tests for required phase Tasks succeeded, failed, in flight, skipped, and superseded
+- [x] 6.6 Implement phase completion detection for the active Plan version
+- [x] 6.7 Add Research phase tests for independent branch success, partial failure, conflict, and insufficient evidence
+- [x] 6.8 Implement accepted research result loading and deterministic Evidence Join
+- [x] 6.9 Persist the EvidenceSet as an immutable stage output bound to active Plan and Attempt results
+- [x] 6.10 Implement Research outcomes for ANALYZING, focused Replan, conflict Gate, degradation, and failure
 - [ ] 6.11 Add tests proving Replan preserves unaffected accepted results and rejects late superseded results
 
 ## 7. Analyze, Write, Review, and Finalize Phases

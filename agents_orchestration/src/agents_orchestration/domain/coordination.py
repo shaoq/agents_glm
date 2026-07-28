@@ -24,7 +24,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_orchestration.domain.artifact import ArtifactRef
-from agents_orchestration.domain.enums import FailureCode, RunState
+from agents_orchestration.domain.enums import FailureCode, RunState, WorkerRole
 from agents_orchestration.domain.ids import RunId
 
 # --- Task 2.1 / 2.2: advance disposition + report --------------------------
@@ -131,6 +131,29 @@ def phase_for_state(state: RunState) -> PhaseId | None:
     """
 
     return PHASE_FOR_STATE[state]
+
+
+# --- Task 6.1 / 6.2: phase-aware Worker role eligibility -------------------
+
+
+PHASE_ROLES: dict[PhaseId, frozenset[WorkerRole]] = {
+    PhaseId.RESEARCH: frozenset({WorkerRole.EVIDENCE_RESEARCHER}),
+    PhaseId.ANALYZE: frozenset({WorkerRole.ANALYST}),
+    PhaseId.WRITE: frozenset({WorkerRole.REPORT_WRITER}),
+    PhaseId.REVIEW: frozenset({WorkerRole.REPORT_REVIEWER}),
+}
+
+
+def eligible_worker_roles(state: RunState) -> frozenset[WorkerRole] | None:
+    """Worker roles permitted to dispatch for ``state``'s phase (task 6.2).
+
+    Non-task phases (Goal / Plan / Finalize) and non-active states return None
+    — the coordinator drives those phases directly without dispatching Tasks,
+    so a tick in such a phase dispatches nothing rather than later-stage work.
+    """
+
+    phase = phase_for_state(state)
+    return PHASE_ROLES.get(phase) if phase is not None else None
 
 
 # --- Task 2.5 / 2.6: logical stage key + input fingerprint + StageExecution -
@@ -278,12 +301,14 @@ __all__ = [
     "CapturedVersions",
     "InputFingerprint",
     "PHASE_FOR_STATE",
+    "PHASE_ROLES",
     "PhaseId",
     "PhaseResultClassification",
     "StageExecution",
     "StageStatus",
     "TaskTickSummary",
     "classify_phase_result",
+    "eligible_worker_roles",
     "phase_for_state",
     "stage_idempotency_key",
     "stage_logical_key",

@@ -19,6 +19,7 @@ from agents_orchestration.domain.coordination import (
     AdvanceDisposition,
     InputFingerprint,
     PhaseId,
+    TaskTickSummary,
 )
 from agents_orchestration.domain.enums import (
     CapabilityKind,
@@ -26,8 +27,11 @@ from agents_orchestration.domain.enums import (
     FailureCode,
     GateType,
     RunState,
+    TaskState,
+    WorkerRole,
 )
 from agents_orchestration.domain.events import DomainEvent
+from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.plan import Plan
 from agents_orchestration.domain.policy import SystemLimits
@@ -213,7 +217,84 @@ class PlanningPhaseHandler:
         return new_run
 
 
+class ResearchPhaseHandler:
+    """RESEARCHING phase (tasks 6.7-6.10): drive research Tasks through the
+    Task Runtime, then deterministically join accepted evidence into an
+    immutable EvidenceSet before entering ANALYZING.
+
+    ``tick`` is the bounded :class:`RuntimeTick` (phase-role filtering in 6.2
+    ensures it only dispatches EVIDENCE_RESEARCHER Tasks here).
+    ``evidence_provider`` loads accepted research evidence for the Join; the
+    composition root (Ch.9) wires a real loader, tests inject a Fake.
+    """
+
+    phase = PhaseId.RESEARCH
+
+    def __init__(self, tick, evidence_provider, *, clock, idgen) -> None:
+        self.tick = tick
+        self.evidence_provider = evidence_provider
+        self.clock = clock
+        self.idgen = idgen
+
+    async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
+        fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
+        with backend.unit_of_work() as uow:
+            tasks = [
+                t
+                for t in uow.tasks.by_run(
+                    ctx.run.run_id, plan_version=ctx.run.current_plan_version
+                )
+                if t.worker_role is WorkerRole.EVIDENCE_RESEARCHER
+            ]
+            uow.commit()
+        if not tasks:
+            return PhaseOutcome(
+                disposition=AdvanceDisposition.IDLE, reason="no-research-tasks",
+                stage_logical_key="research", input_fingerprint=fp,
+            )
+        if any(not t.is_terminal for t in tasks):  # 6.5: work in flight / pending
+            report = await self.tick.tick(ctx.run.run_id)
+            summary = TaskTickSummary(
+                dispatched=report.dispatched, accepted=report.accepted,
+                terminal=report.terminal,
+            )
+            disposition = (
+                AdvanceDisposition.PROGRESSED
+                if (report.dispatched or report.accepted)
+                else AdvanceDisposition.IDLE
+            )
+            return PhaseOutcome(
+                disposition=disposition, next_state=None,
+                reason=f"research-tick:dispatched={report.dispatched}",
+                stage_logical_key="research", input_fingerprint=fp, task_tick=summary,
+            )
+        if all(t.state is TaskState.SUCCEEDED for t in tasks):  # 6.8: Join
+            evidences = await self.evidence_provider(ctx.run.run_id)
+            evidence_set = EvidenceSet.join(
+                run_id=ctx.run.run_id, task_id="research",
+                evidences=tuple(evidences), required=True,
+            )
+            return PhaseOutcome(
+                disposition=AdvanceDisposition.PROGRESSED,
+                next_state=RunState.ANALYZING,
+                reason=f"research-joined:sufficiency={evidence_set.sufficiency.value}",
+                stage_logical_key="research", input_fingerprint=fp, proposal=evidence_set,
+            )
+        return PhaseOutcome(  # 6.10: a required research Task failed -> degrade
+            disposition=AdvanceDisposition.IDLE, reason="research-task-failed",
+            failure_code=FailureCode.UNKNOWN, stage_logical_key="research",
+            input_fingerprint=fp,
+        )
+
+    def accept(self, outcome: PhaseOutcome, run: Run, uow, now) -> Run:
+        moved = transition_or_stay(run, outcome.next_state, now)
+        if moved.state is not run.state:
+            uow.runs.save(moved, expected_version=run.state_version)
+        return moved
+
+
 __all__ = [
     "GoalPhaseHandler",
     "PlanningPhaseHandler",
+    "ResearchPhaseHandler",
 ]
