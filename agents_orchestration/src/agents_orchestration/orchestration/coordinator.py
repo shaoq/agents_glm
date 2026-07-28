@@ -4,16 +4,18 @@ Sits above the Task Runtime (``RuntimeTick``). ``advance(run_id)`` executes at
 most one bounded semantic step, routing to a phase handler selected solely from
 durable Run state, and returns a structured :class:`AdvanceReport`.
 
-Phase handlers (Ch.5-7) implement the prepare/execute/accept protocol: the
-coordinator captures input versions in a short read, invokes the handler
-*outside* any write transaction, then classifies and accepts the result in a
-write transaction that also persists the stage record, the Event, and the
-semantic Checkpoint atomically (design Decision 4).
+Each phase follows the prepare/execute/accept protocol (design Decision 4):
+the coordinator captures input versions in a short read, the handler's async
+``execute`` invokes providers *outside* any write transaction, then the
+handler's ``accept`` performs phase-specific persistence (GoalSpec/Contract,
+Plan/Tasks, …) inside the write transaction while the coordinator records the
+stage record, Event, and semantic Checkpoint atomically.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from agents_orchestration.domain.artifact import ArtifactRef
@@ -63,7 +65,8 @@ class PhaseOutcome:
 
     ``disposition`` is PROGRESSED / BLOCKED / IDLE — never TERMINAL; the
     coordinator owns terminal transitions through deterministic policy and
-    guards.
+    guards. ``proposal`` carries the phase-specific payload (e.g. a
+    GoalNormalizationOutcome or PlanProposal) that ``accept`` consumes.
     """
 
     disposition: AdvanceDisposition
@@ -76,6 +79,7 @@ class PhaseOutcome:
     task_tick: TaskTickSummary | None = None
     open_gate: GateType | None = None
     failure_code: FailureCode | None = None
+    proposal: object | None = None
 
 
 class PhaseHandler(Protocol):
@@ -87,15 +91,16 @@ class PhaseHandler(Protocol):
         """Invoke providers OUTSIDE any write transaction and return an outcome."""
         ...
 
+    def accept(self, outcome: PhaseOutcome, run: Run, uow, now: datetime) -> Run:
+        """Persist phase-specific accepted outputs inside the write transaction
+        and return the resulting Run (possibly transitioned). Called only for
+        PROGRESSED outcomes on non-stale runs (task 4.5)."""
+        ...
+
 
 @dataclass(frozen=True)
 class CoordinatorDiagnostics:
-    """Structured, secret-redacted diagnostics for coordinator errors (task 4.10).
-
-    Handlers and adapters must scrub credential-like text before raising; this
-    record carries only codes and non-sensitive context so Events, logs and CLI
-    output never leak secrets.
-    """
+    """Structured, secret-redacted diagnostics for coordinator errors (task 4.10)."""
 
     code: str
     message: str
@@ -156,10 +161,8 @@ class RunCoordinator:
             plan_version=run.current_plan_version,
         )
         ctx = PhaseContext(run=run, phase=phase, captured=captured)
-        # Provider call happens OUTSIDE any write transaction (task 4.5).
-        outcome = await handler.execute(ctx, self.backend)
-        # task 4.4: one advance executes at most one phase — we return here.
-        return self._accept(run.run_id, phase, outcome, captured)
+        outcome = await handler.execute(ctx, self.backend)  # outside write txn (4.5)
+        return self._accept(run.run_id, phase, outcome, captured)  # one phase (4.4)
 
     # --- short-circuits ------------------------------------------------------
 
@@ -174,18 +177,12 @@ class RunCoordinator:
             )
             uow.commit()
         return AdvanceReport(
-            run_id=run.run_id,
-            from_state=run.state,
-            to_state=moved.state,
-            disposition=AdvanceDisposition.PROGRESSED,
-            reason="created->normalizing",
+            run_id=run.run_id, from_state=run.state, to_state=moved.state,
+            disposition=AdvanceDisposition.PROGRESSED, reason="created->normalizing",
             state_version=moved.state_version,
         )
 
     def _guard_terminate(self, run: Run) -> AdvanceReport | None:
-        """Deadline / budget guards (task 4.9). Replan/revision bounds are
-        enforced by the Review/Replan phases (Ch.7), not here."""
-
         now = self.backend.clock.now()
         if run.budget.exhausted(now):
             reason = (
@@ -213,14 +210,7 @@ class RunCoordinator:
 
     # --- outcome acceptance --------------------------------------------------
 
-    def _accept(
-        self,
-        run_id: str,
-        phase: PhaseId,
-        outcome: PhaseOutcome,
-        captured: CapturedVersions,
-    ) -> AdvanceReport:
-        # Re-read to detect drift during the out-of-transaction provider call.
+    def _accept(self, run_id, phase, outcome, captured):
         current = self._load(run_id)
         now = self.backend.clock.now()
         current_versions = CapturedVersions(
@@ -234,51 +224,44 @@ class RunCoordinator:
             return self._accept_observation(
                 current, phase, outcome, now, reason=f"{phase.value}:stale-observation"
             )
-
-        if outcome.disposition is AdvanceDisposition.PROGRESSED:
-            return self._accept_progressed(current, phase, outcome, now)
         if outcome.disposition is AdvanceDisposition.BLOCKED:
             return self._accept_blocked(current, phase, outcome, now)
-        return self._accept_observation(  # IDLE (task 4.8)
-            current, phase, outcome, now, reason=outcome.reason or f"{phase.value}:idle",
-            disposition=AdvanceDisposition.IDLE,
-        )
-
-    def _accept_progressed(
-        self, run: Run, phase: PhaseId, outcome: PhaseOutcome, now
-    ) -> AdvanceReport:
-        target = outcome.next_state or run.state
-        if target is not run.state:
-            assert_run_transition(run.state, target)
-        moved = run.transition(target, now) if target is not run.state else run
+        if outcome.disposition is AdvanceDisposition.IDLE:
+            return self._accept_observation(
+                current, phase, outcome, now,
+                reason=outcome.reason or f"{phase.value}:idle",
+            )
+        # PROGRESSED: handler.accept does phase-specific persistence.
         with self.backend.unit_of_work() as uow:
+            new_run = self.handlers[phase].accept(outcome, current, uow, now)
+            if new_run.state is not current.state:
+                uow.events.append([
+                    self._event(new_run, EffectType.RUN_STATE_TRANSITION, now,
+                                payload={"phase": phase.value})
+                ])
             if outcome.input_fingerprint is not None:
-                self._persist_accepted_stage(uow, run, phase, outcome, now)
-            if target is not run.state:
-                uow.runs.save(moved, expected_version=run.state_version)
-            uow.events.append([
-                self._event(moved, EffectType.RUN_STATE_TRANSITION, now,
-                            payload={"phase": phase.value})
-            ])
+                self._persist_accepted_stage(uow, current, phase, outcome, now)
             uow.checkpoints.save(
-                self._checkpoint(moved, self._checkpoint_kind(phase),
-                                 outcome.reason or f"{phase.value}:progressed", now)
+                self._checkpoint(
+                    new_run, self._checkpoint_kind(phase),
+                    outcome.reason or f"{phase.value}:{outcome.disposition.value}", now,
+                )
             )
             uow.commit()
         return AdvanceReport(
-            run_id=run.run_id, from_state=run.state, to_state=moved.state,
-            disposition=AdvanceDisposition.PROGRESSED, reason=outcome.reason,
-            state_version=moved.state_version,
+            run_id=current.run_id, from_state=current.state, to_state=new_run.state,
+            disposition=outcome.disposition, reason=outcome.reason,
+            state_version=new_run.state_version,
             stage_logical_key=outcome.stage_logical_key or None,
             task_tick=outcome.task_tick,
         )
 
-    def _accept_blocked(
-        self, run: Run, phase: PhaseId, outcome: PhaseOutcome, now
-    ) -> AdvanceReport:
+    def _accept_blocked(self, run, phase, outcome, now):
         with self.backend.unit_of_work() as uow:
             if outcome.input_fingerprint is not None:
                 self._persist_observation_stage(uow, run, phase, outcome, now)
+            if outcome.open_gate is not None:
+                self._open_gate(uow, run, outcome)
             uow.events.append([
                 self._event(run, EffectType.RUN_STATE_TRANSITION, now,
                             payload={"phase": phase.value, "blocked": True})
@@ -293,24 +276,24 @@ class RunCoordinator:
             task_tick=outcome.task_tick,
         )
 
-    def _accept_observation(
-        self,
-        run: Run,
-        phase: PhaseId,
-        outcome: PhaseOutcome,
-        now,
-        *,
-        reason: str,
-        disposition: AdvanceDisposition = AdvanceDisposition.IDLE,
-    ) -> AdvanceReport:
+    def _accept_observation(self, run, phase, outcome, now, *, reason):
         with self.backend.unit_of_work() as uow:
             if outcome.input_fingerprint is not None:
                 self._persist_observation_stage(uow, run, phase, outcome, now)
             uow.commit()
         return AdvanceReport(
             run_id=run.run_id, from_state=run.state, to_state=run.state,
-            disposition=disposition, reason=reason, state_version=run.state_version,
-            task_tick=outcome.task_tick,
+            disposition=AdvanceDisposition.IDLE, reason=reason,
+            state_version=run.state_version, task_tick=outcome.task_tick,
+        )
+
+    def _open_gate(self, uow, run, outcome) -> None:
+        from agents_orchestration.orchestration.gates import GateService
+
+        GateService(uow, self.backend.clock, self.backend.idgen).open(
+            run, outcome.open_gate,
+            actor="system", role="orchestrator", scope=run.run_id,
+            allowed_response_schema="{}",
         )
 
     # --- stage / event / checkpoint helpers ----------------------------------
@@ -319,8 +302,7 @@ class RunCoordinator:
         stage = self._build_stage(run, phase, outcome, StageStatus.PREPARED, now)
         uow.stages.prepare(stage)
         accepted = stage.transition(
-            StageStatus.ACCEPTED,
-            at=now,
+            StageStatus.ACCEPTED, at=now,
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
         )
@@ -334,46 +316,30 @@ class RunCoordinator:
         logical = outcome.stage_logical_key or stage_logical_key(phase)
         return StageExecution(
             stage_execution_id=self.backend.idgen.new_id("stage"),
-            run_id=run.run_id,
-            phase=phase,
-            logical_stage_key=logical,
-            fingerprint=fp,
-            status=status,
+            run_id=run.run_id, phase=phase, logical_stage_key=logical,
+            fingerprint=fp, status=status,
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
             failure_code=outcome.failure_code,
             idempotency_key=stage_idempotency_key(run.run_id, logical, fp.hexdigest()),
-            created_at=now,
-            updated_at=now,
+            created_at=now, updated_at=now,
         )
 
-    def _event(
-        self, run: Run, effect: EffectType, now, *, kind: str = "",
-        payload: dict | None = None,
-    ) -> DomainEvent:
+    def _event(self, run, effect, now, *, kind="", payload=None) -> DomainEvent:
         data = dict(payload or {})
         if kind:
             data["kind"] = kind
         return DomainEvent(
             event_id=self.backend.idgen.new_id("evt"),
-            run_id=run.run_id,
-            effect=effect,
-            state_version=run.state_version,
-            occurred_at=now,
-            payload=data,
+            run_id=run.run_id, effect=effect, state_version=run.state_version,
+            occurred_at=now, payload=data,
         )
 
-    def _checkpoint(
-        self, run: Run, kind: CheckpointKind, reason: str, now
-    ) -> Checkpoint:
+    def _checkpoint(self, run, kind, reason, now) -> Checkpoint:
         return Checkpoint(
             checkpoint_id=self.backend.idgen.new_id("ckpt"),
-            run_id=run.run_id,
-            kind=kind,
-            state_version=run.state_version,
-            plan_version=run.current_plan_version,
-            reason=reason,
-            created_at=now,
+            run_id=run.run_id, kind=kind, state_version=run.state_version,
+            plan_version=run.current_plan_version, reason=reason, created_at=now,
         )
 
     @staticmethod
@@ -404,18 +370,20 @@ class RunCoordinator:
         return f"terminal:{run.termination.value}" if run.termination else "terminal"
 
     @staticmethod
-    def _report(
-        run: Run, to_state: RunState, disposition: AdvanceDisposition,
-        *, reason: str, from_state: RunState | None = None,
-    ) -> AdvanceReport:
+    def _report(run, to_state, disposition, *, reason, from_state=None):
         return AdvanceReport(
-            run_id=run.run_id,
-            from_state=from_state or run.state,
-            to_state=to_state,
-            disposition=disposition,
-            reason=reason,
-            state_version=run.state_version,
+            run_id=run.run_id, from_state=from_state or run.state, to_state=to_state,
+            disposition=disposition, reason=reason, state_version=run.state_version,
         )
+
+
+def transition_or_stay(run: Run, target: RunState | None, now: datetime) -> Run:
+    """Helper for simple phase ``accept`` impls: transition if ``target`` differs."""
+
+    if target is not None and target is not run.state:
+        assert_run_transition(run.state, target)
+        return run.transition(target, now)
+    return run
 
 
 __all__ = [
@@ -424,4 +392,5 @@ __all__ = [
     "PhaseHandler",
     "PhaseOutcome",
     "RunCoordinator",
+    "transition_or_stay",
 ]

@@ -20,6 +20,7 @@ from agents_orchestration.orchestration.coordinator import (
     PhaseContext,
     PhaseOutcome,
     RunCoordinator,
+    transition_or_stay,
 )
 
 NOW = datetime(2026, 7, 28, tzinfo=UTC)
@@ -36,6 +37,12 @@ class _FakeHandler:
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         self.calls += 1
         return self._outcome
+
+    def accept(self, outcome: PhaseOutcome, run: Run, uow, now) -> Run:
+        moved = transition_or_stay(run, outcome.next_state, now)
+        if moved.state is not run.state:
+            uow.runs.save(moved, expected_version=run.state_version)
+        return moved
 
 
 def _seed(
@@ -131,6 +138,12 @@ async def test_handler_executes_outside_write_transaction(backend) -> None:
             seen["in_txn"] = backend.conn.in_transaction
             return PhaseOutcome(AdvanceDisposition.PROGRESSED, next_state=RunState.PLANNING)
 
+        def accept(self, outcome: PhaseOutcome, run: Run, uow, now) -> Run:
+            moved = transition_or_stay(run, outcome.next_state, now)
+            if moved.state is not run.state:
+                uow.runs.save(moved, expected_version=run.state_version)
+            return moved
+
     coord = RunCoordinator(backend, {PhaseId.GOAL: _Probe()})
     run = _seed(backend, RunState.NORMALIZING)
     await coord.advance(run.run_id)
@@ -155,6 +168,9 @@ async def test_stale_result_does_not_advance_run(backend) -> None:
             return PhaseOutcome(
                 AdvanceDisposition.PROGRESSED, next_state=RunState.PLANNING, reason="goal"
             )
+
+        def accept(self, outcome: PhaseOutcome, run: Run, uow, now) -> Run:
+            return run  # not reached: the drifted result is classified stale
 
     coord = RunCoordinator(backend, {PhaseId.GOAL: _Drift()})
     run = _seed(backend, RunState.NORMALIZING)

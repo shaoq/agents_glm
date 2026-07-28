@@ -46,16 +46,16 @@
 
 ## 5. Goal and Planning Phases
 
-- [ ] 5.1 Define async GoalNormalizer and Planner composition contracts used by phase handlers
-- [ ] 5.2 Add Goal phase tests for clear, ambiguous, invalid, stale, and provider-failure outcomes
-- [ ] 5.3 Implement Goal phase snapshot, external normalization, deterministic validation, and atomic acceptance
-- [ ] 5.4 Persist accepted GoalSpec and Completion Contract before entering PLANNING
-- [ ] 5.5 Open a version-bound GOAL_CLARIFICATION Gate for material ambiguity
-- [ ] 5.6 Add Planning phase tests for valid, invalid, incomplete-role, approval-required, and stale proposals
-- [ ] 5.7 Extend Plan validation to require phase-role and deliverable coverage
-- [ ] 5.8 Implement Planning phase proposal, validation, rejection policy, and Plan acceptance
-- [ ] 5.9 Open PLAN_APPROVAL before Tasks become executable when policy requires approval
-- [ ] 5.10 Add tests proving a rejected or unapproved Plan materializes no executable Tasks
+- [x] 5.1 Define async GoalNormalizer and Planner composition contracts used by phase handlers
+- [x] 5.2 Add Goal phase tests for clear, ambiguous, invalid, stale, and provider-failure outcomes
+- [x] 5.3 Implement Goal phase snapshot, external normalization, deterministic validation, and atomic acceptance
+- [x] 5.4 Persist accepted GoalSpec and Completion Contract before entering PLANNING
+- [x] 5.5 Open a version-bound GOAL_CLARIFICATION Gate for material ambiguity
+- [x] 5.6 Add Planning phase tests for valid, invalid, incomplete-role, approval-required, and stale proposals
+- [x] 5.7 Extend Plan validation to require phase-role and deliverable coverage
+- [x] 5.8 Implement Planning phase proposal, validation, rejection policy, and Plan acceptance
+- [x] 5.9 Open PLAN_APPROVAL before Tasks become executable when policy requires approval
+- [x] 5.10 Add tests proving a rejected or unapproved Plan materializes no executable Tasks
 
 ## 6. Phase-aware Task Runtime and Research Join
 
