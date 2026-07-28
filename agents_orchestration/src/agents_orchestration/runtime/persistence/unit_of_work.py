@@ -17,6 +17,7 @@ from agents_orchestration.runtime.persistence.repositories import (
     SqliteCompletionContractRepository,
     SqliteDependencyRepository,
     SqliteEventStore,
+    SqliteEvidenceRepository,
     SqliteGateRepository,
     SqliteGoalRepository,
     SqliteLeaseRepository,
@@ -54,6 +55,7 @@ class SqliteUnitOfWork:
         self.outbox = SqliteOutbox(self._conn)
         self.artifacts = SqliteArtifactStore(self._conn, backend.artifact_dir)
         self.dedup = SqliteRequestDedupStore(self._conn, backend.clock)
+        self.evidence = SqliteEvidenceRepository(self._conn)
 
     def __enter__(self) -> SqliteUnitOfWork:
         if self._active:

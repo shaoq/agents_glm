@@ -161,6 +161,16 @@ CREATE INDEX IF NOT EXISTS ix_stage_exec_idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS ux_stage_exec_accepted
     ON stage_executions (run_id, logical_stage_key, fingerprint_hex)
     WHERE status = 'accepted';
+
+CREATE TABLE IF NOT EXISTS evidence (
+    evidence_id  TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    attempt_id   TEXT,
+    source_kind  TEXT NOT NULL,
+    data         TEXT NOT NULL,
+    PRIMARY KEY (run_id, evidence_id)
+);
+CREATE INDEX IF NOT EXISTS ix_evidence_run ON evidence (run_id);
 """
 
 

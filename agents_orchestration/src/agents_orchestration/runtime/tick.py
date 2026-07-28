@@ -257,6 +257,8 @@ class RuntimeTick:
         result_ref = result.artifacts[0] if result and result.artifacts else None
         for artifact in result.artifacts if result else ():
             uow.artifacts.record_metadata(artifact)
+        if result and result.evidence:
+            uow.evidence.save_many(run.run_id, attempt.attempt_id, result.evidence)
         uow.attempts.save(
             attempt.succeed(result_ref, now)
             if result_ref

@@ -16,6 +16,7 @@ from datetime import datetime
 from agents_orchestration.domain.coordination import StageExecution, StageStatus
 from agents_orchestration.domain.enums import FailureCode
 from agents_orchestration.domain.events import DomainEvent
+from agents_orchestration.domain.evidence import Evidence
 from agents_orchestration.domain.execution import Attempt, Operation, Run, Task
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.lifecycle import Checkpoint, Gate, Lease
@@ -465,9 +466,7 @@ class SqliteStageExecutionRepository:
         ).fetchone()
         return load(StageExecution, row["data"]) if row else None
 
-    def for_logical_stage(
-        self, run_id: str, logical_stage_key: str
-    ) -> list[StageExecution]:
+    def for_logical_stage(self, run_id: str, logical_stage_key: str) -> list[StageExecution]:
         rows = self.conn.execute(
             "SELECT data FROM stage_executions "
             "WHERE run_id = ? AND logical_stage_key = ? ORDER BY rowid",
@@ -579,3 +578,38 @@ class SqliteStageExecutionRepository:
         updated = current.transition(status, at=at, failure_code=failure_code)
         self.save(updated)
         return updated
+
+
+class SqliteEvidenceRepository:
+    """Persisted accepted evidence read by downstream phases (tasks 2.1 / 2.2).
+
+    Large content stays in artifacts; this row carries the evidence payload (text
+    + source + citation + trust) plus run/attempt linkage, persisted atomically
+    with the accept transaction.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def save_many(self, run_id: str, attempt_id: str | None, evidences: Sequence[Evidence]) -> None:
+        for ev in evidences:
+            self.conn.execute(
+                "INSERT INTO evidence (evidence_id, run_id, attempt_id, source_kind, data) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(run_id, evidence_id) DO UPDATE SET "
+                "attempt_id = excluded.attempt_id, source_kind = excluded.source_kind, "
+                "data = excluded.data",
+                (
+                    ev.evidence_id,
+                    run_id,
+                    attempt_id,
+                    ev.source.source_kind.value,
+                    dump(ev),
+                ),
+            )
+
+    def by_run(self, run_id: str) -> list[Evidence]:
+        rows = self.conn.execute(
+            "SELECT data FROM evidence WHERE run_id = ? ORDER BY rowid", (run_id,)
+        )
+        return [load(Evidence, row["data"]) for row in rows]

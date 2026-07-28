@@ -7,10 +7,10 @@
 
 ## 2. Accepted-Evidence Persistence
 
-- [ ] 2.1 Decide store: add an `evidence` persistence path (new table/repo preferred for queryability) within the existing UnitOfWork; large content stays in artifacts, the evidence record carries text + source + citation + trust + run_id + attempt_id
-- [ ] 2.2 Persist accepted evidence inside `RuntimeTick._accept_success` (same atomic transaction as Task/Attempt/Event/Checkpoint/Outbox); rollback must hide it
-- [ ] 2.3 Implement `evidence_provider(run_id)` reading the persisted accepted evidence for Research Join and Analysis
-- [ ] 2.4 Integration-test: accept a Task with evidence → provider returns it; rollback → provider returns nothing (atomicity)
+- [x] 2.1 Decide store: add an `evidence` persistence path (new table/repo preferred for queryability) within the existing UnitOfWork; large content stays in artifacts, the evidence record carries text + source + citation + trust + run_id + attempt_id
+- [x] 2.2 Persist accepted evidence inside `RuntimeTick._accept_success` (same atomic transaction as Task/Attempt/Event/Checkpoint/Outbox); rollback must hide it
+- [x] 2.3 Implement `evidence_provider(run_id)` reading the persisted accepted evidence for Research Join and Analysis
+- [x] 2.4 Integration-test: accept a Task with evidence → provider returns it; rollback → provider returns nothing (atomicity)
 
 ## 3. LLM Phase Ports (function calling)
 

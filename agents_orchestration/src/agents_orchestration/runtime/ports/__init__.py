@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 
 from agents_orchestration.domain.artifact import ArtifactKind, ArtifactRef
 from agents_orchestration.domain.events import DomainEvent
+from agents_orchestration.domain.evidence import Evidence
 from agents_orchestration.domain.execution import Attempt, Operation, Run, Task
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.lifecycle import Checkpoint, Gate, Lease
@@ -161,6 +162,17 @@ class ArtifactStore(Protocol):
 
 
 @runtime_checkable
+@runtime_checkable
+class EvidenceStore(Protocol):
+    """Persisted accepted evidence read by downstream phases (Research Join / Analysis)."""
+
+    def save_many(
+        self, run_id: str, attempt_id: str | None, evidences: Sequence[Evidence]
+    ) -> None: ...
+
+    def by_run(self, run_id: str) -> Sequence[Evidence]: ...
+
+
 class UnitOfWork(Protocol):
     """One atomic transaction spanning state, events, checkpoint and outbox."""
 
@@ -179,6 +191,7 @@ class UnitOfWork(Protocol):
     operations: OperationRepository
     artifacts: ArtifactStore
     dedup: RequestDedupStore
+    evidence: EvidenceStore
 
     def __enter__(self) -> UnitOfWork: ...
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None: ...
