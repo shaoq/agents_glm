@@ -25,6 +25,7 @@ from agents_orchestration.runtime.persistence.repositories import (
     SqlitePlanRepository,
     SqliteRequestDedupStore,
     SqliteRunRepository,
+    SqliteStageExecutionRepository,
     SqliteTaskRepository,
 )
 
@@ -38,6 +39,7 @@ class SqliteUnitOfWork:
         self._active = False
 
         self.runs = SqliteRunRepository(self._conn)
+        self.stages = SqliteStageExecutionRepository(self._conn)
         self.tasks = SqliteTaskRepository(self._conn)
         self.attempts = SqliteAttemptRepository(self._conn)
         self.plans = SqlitePlanRepository(self._conn)

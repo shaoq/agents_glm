@@ -21,15 +21,15 @@
 
 ## 3. Stage Execution Persistence
 
-- [ ] 3.1 Add migration tests for StageExecution and continuation schema on a fresh SQLite database
-- [ ] 3.2 Add migration tests upgrading an existing orchestration database without deleting Run history
-- [ ] 3.3 Add additive SQLite schema for stage executions, input fingerprints, output refs, and statuses
-- [ ] 3.4 Implement StageExecution repository create, lookup, accept, reject, fail, and supersede operations
-- [ ] 3.5 Enforce one accepted StageExecution per Run, logical stage key, and input fingerprint
-- [ ] 3.6 Add repository tests for idempotent prepare and accepted-result reuse
-- [ ] 3.7 Add compare-and-set tests for concurrent stage acceptance
-- [ ] 3.8 Integrate the StageExecution repository into UnitOfWork and persistence ports
-- [ ] 3.9 Add serialization round-trip tests for stage records and immutable Artifact refs
+- [x] 3.1 Add migration tests for StageExecution and continuation schema on a fresh SQLite database
+- [x] 3.2 Add migration tests upgrading an existing orchestration database without deleting Run history
+- [x] 3.3 Add additive SQLite schema for stage executions, input fingerprints, output refs, and statuses
+- [x] 3.4 Implement StageExecution repository create, lookup, accept, reject, fail, and supersede operations
+- [x] 3.5 Enforce one accepted StageExecution per Run, logical stage key, and input fingerprint
+- [x] 3.6 Add repository tests for idempotent prepare and accepted-result reuse
+- [x] 3.7 Add compare-and-set tests for concurrent stage acceptance
+- [x] 3.8 Integrate the StageExecution repository into UnitOfWork and persistence ports
+- [x] 3.9 Add serialization round-trip tests for stage records and immutable Artifact refs
 
 ## 4. RunCoordinator Core
 

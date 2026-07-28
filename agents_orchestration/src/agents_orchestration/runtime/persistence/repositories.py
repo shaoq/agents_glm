@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterator, Sequence
+from datetime import datetime
 
+from agents_orchestration.domain.coordination import StageExecution, StageStatus
+from agents_orchestration.domain.enums import FailureCode
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Attempt, Operation, Run, Task
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
@@ -421,3 +424,148 @@ class SqliteRequestDedupStore:
         if row is None or row["result"] is None:
             return None
         return json.loads(row["result"])
+
+
+class SqliteStageExecutionRepository:
+    """Durable StageExecution records: prepare/accept lifecycle with idempotency
+    and one-accepted-per-fingerprint enforcement (design Decision 5, tasks 3.4-3.8).
+
+    Large payloads stay in immutable Artifacts; this table stores only the key
+    columns needed for indexed lookups plus a ``data`` blob holding the full
+    immutable StageExecution. Compare-and-set acceptance and the partial unique
+    index ``ux_stage_exec_accepted`` together guarantee that a restart reuses an
+    accepted result instead of re-invoking the provider (task 3.6 / 3.7).
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, stage_execution_id: str) -> StageExecution | None:
+        row = self.conn.execute(
+            "SELECT data FROM stage_executions WHERE stage_execution_id = ?",
+            (stage_execution_id,),
+        ).fetchone()
+        return load(StageExecution, row["data"]) if row else None
+
+    def by_idempotency_key(self, idempotency_key: str) -> StageExecution | None:
+        row = self.conn.execute(
+            "SELECT data FROM stage_executions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        return load(StageExecution, row["data"]) if row else None
+
+    def accepted_for(
+        self, run_id: str, logical_stage_key: str, fingerprint_hex: str
+    ) -> StageExecution | None:
+        row = self.conn.execute(
+            "SELECT data FROM stage_executions "
+            "WHERE run_id = ? AND logical_stage_key = ? AND fingerprint_hex = ? "
+            "AND status = 'accepted'",
+            (run_id, logical_stage_key, fingerprint_hex),
+        ).fetchone()
+        return load(StageExecution, row["data"]) if row else None
+
+    def for_logical_stage(
+        self, run_id: str, logical_stage_key: str
+    ) -> list[StageExecution]:
+        rows = self.conn.execute(
+            "SELECT data FROM stage_executions "
+            "WHERE run_id = ? AND logical_stage_key = ? ORDER BY rowid",
+            (run_id, logical_stage_key),
+        ).fetchall()
+        return [load(StageExecution, r["data"]) for r in rows]
+
+    def save(self, stage: StageExecution) -> None:
+        """Upsert a stage execution row; key columns mirror the data blob."""
+
+        self.conn.execute(
+            "INSERT INTO stage_executions "
+            "(stage_execution_id, run_id, phase, logical_stage_key, fingerprint_hex, "
+            " status, idempotency_key, attempt_count, failure_code, data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(stage_execution_id) DO UPDATE SET "
+            " run_id = excluded.run_id, phase = excluded.phase, "
+            " logical_stage_key = excluded.logical_stage_key, "
+            " fingerprint_hex = excluded.fingerprint_hex, status = excluded.status, "
+            " idempotency_key = excluded.idempotency_key, "
+            " attempt_count = excluded.attempt_count, "
+            " failure_code = excluded.failure_code, data = excluded.data",
+            (
+                stage.stage_execution_id,
+                stage.run_id,
+                stage.phase.value,
+                stage.logical_stage_key,
+                stage.fingerprint.hexdigest(),
+                stage.status.value,
+                stage.idempotency_key,
+                stage.attempt_count,
+                _term(stage.failure_code),
+                dump(stage),
+            ),
+        )
+
+    def prepare(self, stage: StageExecution) -> StageExecution:
+        """Idempotent prepare (task 3.6).
+
+        Reuses an accepted result for the same logical stage + fingerprint
+        instead of re-preparing; otherwise replays an existing record for the
+        same idempotency key; otherwise inserts the prepared record.
+        """
+
+        accepted = self.accepted_for(
+            stage.run_id, stage.logical_stage_key, stage.fingerprint.hexdigest()
+        )
+        if accepted is not None:
+            return accepted
+        existing = self.by_idempotency_key(stage.idempotency_key)
+        if existing is not None:
+            return existing
+        self.save(stage)
+        return stage
+
+    def accept(
+        self,
+        stage_execution_id: str,
+        *,
+        accepted: StageExecution,
+        prepared_status: StageStatus = StageStatus.PREPARED,
+    ) -> StageExecution:
+        """Compare-and-set accept (task 3.7).
+
+        Atomically flips the record from ``prepared_status`` to ACCEPTED. If
+        another record for the same logical stage + fingerprint already won,
+        that accepted result is reused. The partial unique index guarantees no
+        duplicate accepted rows; a CAS miss raises :class:`ConcurrencyError`.
+        """
+
+        fp_hex = accepted.fingerprint.hexdigest()
+        already = self.accepted_for(accepted.run_id, accepted.logical_stage_key, fp_hex)
+        if already is not None and already.stage_execution_id != stage_execution_id:
+            return already
+        cur = self.conn.execute(
+            "UPDATE stage_executions SET status = 'accepted', data = ? "
+            "WHERE stage_execution_id = ? AND status = ?",
+            (dump(accepted), stage_execution_id, prepared_status.value),
+        )
+        if cur.rowcount == 0:
+            raise ConcurrencyError(
+                f"stage accept CAS failed: {stage_execution_id} not in {prepared_status.value}"
+            )
+        return self.get(stage_execution_id) or accepted
+
+    def transition_status(
+        self,
+        stage_execution_id: str,
+        status: StageStatus,
+        *,
+        at: datetime,
+        failure_code: FailureCode | None = None,
+    ) -> StageExecution:
+        """Move a record to REJECTED / FAILED / SUPERSEDED (task 3.4)."""
+
+        current = self.get(stage_execution_id)
+        if current is None:
+            raise KeyError(stage_execution_id)
+        updated = current.transition(status, at=at, failure_code=failure_code)
+        self.save(updated)
+        return updated

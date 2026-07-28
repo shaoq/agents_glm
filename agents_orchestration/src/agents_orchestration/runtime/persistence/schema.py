@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -138,6 +138,27 @@ CREATE TABLE IF NOT EXISTS request_deduplication (
     result     TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS stage_executions (
+    stage_execution_id TEXT PRIMARY KEY,
+    run_id             TEXT NOT NULL,
+    phase              TEXT NOT NULL,
+    logical_stage_key  TEXT NOT NULL,
+    fingerprint_hex    TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    idempotency_key    TEXT NOT NULL,
+    attempt_count      INTEGER NOT NULL DEFAULT 0,
+    failure_code       TEXT,
+    data               TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_stage_exec_run_key
+    ON stage_executions (run_id, logical_stage_key);
+-- At most one ACCEPTED result per Run + logical stage + input fingerprint
+-- (design Decision 5 / task 3.5). Enforced at the storage boundary so concurrent
+-- accepts cannot produce duplicate accepted results.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stage_exec_accepted
+    ON stage_executions (run_id, logical_stage_key, fingerprint_hex)
+    WHERE status = 'accepted';
 """
 
 
