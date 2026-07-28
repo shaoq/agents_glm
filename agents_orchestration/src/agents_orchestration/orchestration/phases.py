@@ -655,9 +655,7 @@ class FinalizePhaseHandler:
         report, analysis, evidence, deliverables = outcome.proposal
         contract = uow.completion.get(run.run_id)
         if contract is None:
-            raise RuntimeError(
-                f"completion contract missing for run {run.run_id} at finalize"
-            )
+            raise RuntimeError(f"completion contract missing for run {run.run_id} at finalize")
         _per, overall = CompletionEvaluator().evaluate(
             contract,
             evidence=evidence,

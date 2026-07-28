@@ -91,10 +91,7 @@ def run_start(
                 uow.commit()
             typer.echo(
                 json.dumps(
-                    [
-                        {"effect": e.effect.value, "state_version": e.state_version}
-                        for e in events
-                    ],
+                    [{"effect": e.effect.value, "state_version": e.state_version} for e in events],
                     ensure_ascii=False,
                 ),
                 err=True,

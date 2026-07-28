@@ -140,9 +140,7 @@ def test_second_accept_reuses_first_accepted(backend) -> None:
         # A second record for the same fingerprint must reuse the first accepted.
         b = _stage(se_id="se-b", fp=fp, key="kb")
         uow.stages.save(b)
-        reused = uow.stages.accept(
-            "se-b", accepted=b.transition(StageStatus.ACCEPTED, at=NOW)
-        )
+        reused = uow.stages.accept("se-b", accepted=b.transition(StageStatus.ACCEPTED, at=NOW))
         assert reused.stage_execution_id == "se-a"
         # Still exactly one accepted row.
         rows = uow.stages.for_logical_stage("run-1", stage_logical_key(PhaseId.GOAL))
@@ -187,9 +185,7 @@ def test_accept_cas_rejects_non_prepared_status(backend) -> None:
         uow.stages.save(stage)
         uow.stages.transition_status("se-1", StageStatus.REJECTED, at=NOW)
         with pytest.raises(ConcurrencyError):
-            uow.stages.accept(
-                "se-1", accepted=stage.transition(StageStatus.ACCEPTED, at=NOW)
-            )
+            uow.stages.accept("se-1", accepted=stage.transition(StageStatus.ACCEPTED, at=NOW))
         uow.commit()
 
 

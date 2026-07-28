@@ -64,9 +64,7 @@ class OpenAIModelAdapter(AsyncCapabilityAdapter):
         tokens = int(getattr(getattr(response, "usage", None), "total_tokens", 0) or 0)
         return text, tokens
 
-    async def invoke_tools(
-        self, request: CapabilityRequest, tools: list[dict]
-    ) -> CapabilityResult:
+    async def invoke_tools(self, request: CapabilityRequest, tools: list[dict]) -> CapabilityResult:
         """Function-calling mode: pass tool definitions, parse the first tool_call.
 
         Returns ``CapabilityResult.data = {"tool_name", "arguments"}`` where

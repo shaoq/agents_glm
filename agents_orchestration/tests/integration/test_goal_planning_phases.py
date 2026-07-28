@@ -193,9 +193,7 @@ async def test_planning_invalid_proposal_degrades_idle_no_tasks(backend) -> None
     empty = PlanProposal(
         run_id=run.run_id, plan_id="p1", task_specs=(), deliverable_paths=("report.md",)
     )
-    coord = RunCoordinator(
-        backend, {PhaseId.PLAN: _planner_handler(backend, _Planner(empty))}
-    )
+    coord = RunCoordinator(backend, {PhaseId.PLAN: _planner_handler(backend, _Planner(empty))})
     report = await coord.advance(run.run_id)
     assert report.disposition is AdvanceDisposition.IDLE
     assert "plan-invalid" in report.reason
@@ -207,9 +205,7 @@ async def test_planning_invalid_proposal_degrades_idle_no_tasks(backend) -> None
 @pytest.mark.integration
 async def test_planning_provider_failure_degrades_idle(backend) -> None:
     run = _seed_planning(backend)
-    coord = RunCoordinator(
-        backend, {PhaseId.PLAN: _planner_handler(backend, _FailingPlanner())}
-    )
+    coord = RunCoordinator(backend, {PhaseId.PLAN: _planner_handler(backend, _FailingPlanner())})
     report = await coord.advance(run.run_id)
     assert report.disposition is AdvanceDisposition.IDLE
     assert "failed" in report.reason

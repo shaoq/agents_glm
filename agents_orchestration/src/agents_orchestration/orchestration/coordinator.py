@@ -147,16 +147,18 @@ class RunCoordinator:
         run = self._load(run_id)
 
         if run.is_terminal:  # task 4.3
-            return self._report(run, run.state, AdvanceDisposition.TERMINAL,
-                                reason=self._terminal_reason(run))
+            return self._report(
+                run, run.state, AdvanceDisposition.TERMINAL, reason=self._terminal_reason(run)
+            )
 
         if run.state is RunState.CREATED:  # task 4.1: CREATED -> NORMALIZING
             return self._advance_created(run)
 
         phase = phase_for_state(run.state)
         if phase is None:  # task 4.3: paused / gate-waiting have no active phase
-            return self._report(run, run.state, AdvanceDisposition.IDLE,
-                                reason=f"non-active:{run.state.value}")
+            return self._report(
+                run, run.state, AdvanceDisposition.IDLE, reason=f"non-active:{run.state.value}"
+            )
 
         if self._has_open_gate(run_id):  # task 4.3: open Gate blocks the phase
             return self._report(run, run.state, AdvanceDisposition.BLOCKED, reason="open-gate")
@@ -167,8 +169,9 @@ class RunCoordinator:
 
         handler = self.handlers.get(phase)
         if handler is None:
-            return self._report(run, run.state, AdvanceDisposition.IDLE,
-                                reason=f"no-handler:{phase.value}")
+            return self._report(
+                run, run.state, AdvanceDisposition.IDLE, reason=f"no-handler:{phase.value}"
+            )
 
         captured = CapturedVersions(
             state_version=run.state_version,
@@ -191,8 +194,11 @@ class RunCoordinator:
             )
             uow.commit()
         return AdvanceReport(
-            run_id=run.run_id, from_state=run.state, to_state=moved.state,
-            disposition=AdvanceDisposition.PROGRESSED, reason="created->normalizing",
+            run_id=run.run_id,
+            from_state=run.state,
+            to_state=moved.state,
+            disposition=AdvanceDisposition.PROGRESSED,
+            reason="created->normalizing",
             state_version=moved.state_version,
         )
 
@@ -212,12 +218,13 @@ class RunCoordinator:
         moved = run.terminate(reason, now)
         with self.backend.unit_of_work() as uow:
             uow.runs.save(moved, expected_version=run.state_version)
-            uow.events.append([
-                self._event(moved, EffectType.RUN_TERMINATED, now, kind=reason.value)
-            ])
+            uow.events.append(
+                [self._event(moved, EffectType.RUN_TERMINATED, now, kind=reason.value)]
+            )
             uow.checkpoints.save(
-                self._checkpoint(moved, CheckpointKind.FINALIZATION,
-                                 f"terminate:{reason.value}", now)
+                self._checkpoint(
+                    moved, CheckpointKind.FINALIZATION, f"terminate:{reason.value}", now
+                )
             )
             uow.commit()
         return self._report(moved, moved.state, AdvanceDisposition.TERMINAL, reason=reason.value)
@@ -230,10 +237,7 @@ class RunCoordinator:
         current_versions = CapturedVersions(
             state_version=current.state_version, plan_version=current.current_plan_version
         )
-        stale = (
-            classify_phase_result(captured, current_versions)
-            is PhaseResultClassification.STALE
-        )
+        stale = classify_phase_result(captured, current_versions) is PhaseResultClassification.STALE
         if stale:  # task 4.6: stale result becomes an observation, no advance
             return self._accept_observation(
                 current, phase, outcome, now, reason=f"{phase.value}:stale-observation"
@@ -242,29 +246,43 @@ class RunCoordinator:
             return self._accept_blocked(current, phase, outcome, now)
         if outcome.disposition is AdvanceDisposition.IDLE:
             return self._accept_observation(
-                current, phase, outcome, now,
+                current,
+                phase,
+                outcome,
+                now,
                 reason=outcome.reason or f"{phase.value}:idle",
             )
         # PROGRESSED: handler.accept does phase-specific persistence.
         with self.backend.unit_of_work() as uow:
             new_run = self.handlers[phase].accept(outcome, current, uow, now)
             if new_run.state is not current.state:
-                uow.events.append([
-                    self._event(new_run, EffectType.RUN_STATE_TRANSITION, now,
-                                payload={"phase": phase.value})
-                ])
+                uow.events.append(
+                    [
+                        self._event(
+                            new_run,
+                            EffectType.RUN_STATE_TRANSITION,
+                            now,
+                            payload={"phase": phase.value},
+                        )
+                    ]
+                )
             if outcome.input_fingerprint is not None:
                 self._persist_accepted_stage(uow, current, phase, outcome, now)
             uow.checkpoints.save(
                 self._checkpoint(
-                    new_run, self._checkpoint_kind(phase),
-                    outcome.reason or f"{phase.value}:{outcome.disposition.value}", now,
+                    new_run,
+                    self._checkpoint_kind(phase),
+                    outcome.reason or f"{phase.value}:{outcome.disposition.value}",
+                    now,
                 )
             )
             uow.commit()
         return AdvanceReport(
-            run_id=current.run_id, from_state=current.state, to_state=new_run.state,
-            disposition=outcome.disposition, reason=outcome.reason,
+            run_id=current.run_id,
+            from_state=current.state,
+            to_state=new_run.state,
+            disposition=outcome.disposition,
+            reason=outcome.reason,
             state_version=new_run.state_version,
             stage_logical_key=outcome.stage_logical_key or None,
             task_tick=outcome.task_tick,
@@ -281,7 +299,9 @@ class RunCoordinator:
             # carries the blocking condition.
             uow.commit()
         return AdvanceReport(
-            run_id=run.run_id, from_state=run.state, to_state=run.state,
+            run_id=run.run_id,
+            from_state=run.state,
+            to_state=run.state,
             disposition=AdvanceDisposition.BLOCKED,
             reason=outcome.reason or f"{phase.value}:blocked",
             state_version=run.state_version,
@@ -295,9 +315,13 @@ class RunCoordinator:
                 self._persist_observation_stage(uow, run, phase, outcome, now)
             uow.commit()
         return AdvanceReport(
-            run_id=run.run_id, from_state=run.state, to_state=run.state,
-            disposition=AdvanceDisposition.IDLE, reason=reason,
-            state_version=run.state_version, task_tick=outcome.task_tick,
+            run_id=run.run_id,
+            from_state=run.state,
+            to_state=run.state,
+            disposition=AdvanceDisposition.IDLE,
+            reason=reason,
+            state_version=run.state_version,
+            task_tick=outcome.task_tick,
         )
 
     def _open_gate(self, uow, run, outcome) -> None:
@@ -305,9 +329,13 @@ class RunCoordinator:
 
         cont = build_gate_continuation(outcome.open_gate, run)
         GateService(uow, self.backend.clock, self.backend.idgen).open(
-            run, outcome.open_gate,
-            actor="system", role="orchestrator", scope=run.run_id,
-            allowed_response_schema="{}", continuation=cont,
+            run,
+            outcome.open_gate,
+            actor="system",
+            role="orchestrator",
+            scope=run.run_id,
+            allowed_response_schema="{}",
+            continuation=cont,
         )
 
     # --- stage / event / checkpoint helpers ----------------------------------
@@ -316,7 +344,8 @@ class RunCoordinator:
         stage = self._build_stage(run, phase, outcome, StageStatus.PREPARED, now)
         uow.stages.prepare(stage)
         accepted = stage.transition(
-            StageStatus.ACCEPTED, at=now,
+            StageStatus.ACCEPTED,
+            at=now,
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
         )
@@ -330,13 +359,17 @@ class RunCoordinator:
         logical = outcome.stage_logical_key or stage_logical_key(phase)
         return StageExecution(
             stage_execution_id=self.backend.idgen.new_id("stage"),
-            run_id=run.run_id, phase=phase, logical_stage_key=logical,
-            fingerprint=fp, status=status,
+            run_id=run.run_id,
+            phase=phase,
+            logical_stage_key=logical,
+            fingerprint=fp,
+            status=status,
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
             failure_code=outcome.failure_code,
             idempotency_key=stage_idempotency_key(run.run_id, logical, fp.hexdigest()),
-            created_at=now, updated_at=now,
+            created_at=now,
+            updated_at=now,
         )
 
     def _event(self, run, effect, now, *, kind="", payload=None) -> DomainEvent:
@@ -345,15 +378,22 @@ class RunCoordinator:
             data["kind"] = kind
         return DomainEvent(
             event_id=self.backend.idgen.new_id("evt"),
-            run_id=run.run_id, effect=effect, state_version=run.state_version,
-            occurred_at=now, payload=data,
+            run_id=run.run_id,
+            effect=effect,
+            state_version=run.state_version,
+            occurred_at=now,
+            payload=data,
         )
 
     def _checkpoint(self, run, kind, reason, now) -> Checkpoint:
         return Checkpoint(
             checkpoint_id=self.backend.idgen.new_id("ckpt"),
-            run_id=run.run_id, kind=kind, state_version=run.state_version,
-            plan_version=run.current_plan_version, reason=reason, created_at=now,
+            run_id=run.run_id,
+            kind=kind,
+            state_version=run.state_version,
+            plan_version=run.current_plan_version,
+            reason=reason,
+            created_at=now,
         )
 
     @staticmethod
@@ -386,8 +426,12 @@ class RunCoordinator:
     @staticmethod
     def _report(run, to_state, disposition, *, reason, from_state=None):
         return AdvanceReport(
-            run_id=run.run_id, from_state=from_state or run.state, to_state=to_state,
-            disposition=disposition, reason=reason, state_version=run.state_version,
+            run_id=run.run_id,
+            from_state=from_state or run.state,
+            to_state=to_state,
+            disposition=disposition,
+            reason=reason,
+            state_version=run.state_version,
         )
 
 

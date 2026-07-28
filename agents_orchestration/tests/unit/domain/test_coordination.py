@@ -187,9 +187,7 @@ def test_input_fingerprint_hexdigest_is_deterministic() -> None:
 
 @pytest.mark.unit
 def test_input_fingerprint_changes_when_any_version_or_hash_drifts() -> None:
-    base = _fingerprint(
-        state_version=2, plan_version=3, contract_version=1, hashes=("h1",)
-    )
+    base = _fingerprint(state_version=2, plan_version=3, contract_version=1, hashes=("h1",))
     drifted = (
         _fingerprint(state_version=3, plan_version=3, contract_version=1, hashes=("h1",)),
         _fingerprint(state_version=2, plan_version=4, contract_version=1, hashes=("h1",)),
@@ -294,9 +292,7 @@ def test_model_control_instruction_cannot_alter_routing() -> None:
 
 @pytest.mark.unit
 def test_stage_failure_codes_are_known_categories() -> None:
-    stage = _stage(failure_code=FailureCode.TIMEOUT).transition(
-        StageStatus.FAILED, at=NOW
-    )
+    stage = _stage(failure_code=FailureCode.TIMEOUT).transition(StageStatus.FAILED, at=NOW)
     assert stage.failure_code is FailureCode.TIMEOUT
     assert StageStatus.ACCEPTED.is_accepted is True
     assert StageStatus.PREPARED.is_accepted is False

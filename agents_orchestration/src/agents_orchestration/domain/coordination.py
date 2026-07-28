@@ -95,14 +95,14 @@ class AdvanceReport(BaseModel):
 class PhaseId(StrEnum):
     """The fixed set of coordinator phases (design Decision 3)."""
 
-    INIT = "init"            # CREATED -> NORMALIZING
-    GOAL = "goal"            # NORMALIZING
-    PLAN = "plan"            # PLANNING
-    RESEARCH = "research"    # RESEARCHING
-    ANALYZE = "analyze"      # ANALYZING
-    WRITE = "write"          # WRITING
-    REVIEW = "review"        # REVIEWING
-    FINALIZE = "finalize"    # FINALIZING
+    INIT = "init"  # CREATED -> NORMALIZING
+    GOAL = "goal"  # NORMALIZING
+    PLAN = "plan"  # PLANNING
+    RESEARCH = "research"  # RESEARCHING
+    ANALYZE = "analyze"  # ANALYZING
+    WRITE = "write"  # WRITING
+    REVIEW = "review"  # REVIEWING
+    FINALIZE = "finalize"  # FINALIZING
 
 
 PHASE_FOR_STATE: dict[RunState, PhaseId | None] = {
@@ -185,8 +185,8 @@ class InputFingerprint(BaseModel):
     def hexdigest(self) -> str:
         """Deterministic SHA-256 of the bound versions + artifact hashes.
 
-    Order-independent (sorted keys, stable tuple order) so equal inputs always
-    produce equal fingerprints.
+        Order-independent (sorted keys, stable tuple order) so equal inputs always
+        produce equal fingerprints.
         """
 
         payload = json.dumps(
@@ -237,9 +237,7 @@ class StageExecution(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    def transition(
-        self, status: StageStatus, *, at: datetime, **changes: object
-    ) -> StageExecution:
+    def transition(self, status: StageStatus, *, at: datetime, **changes: object) -> StageExecution:
         """Return a new StageExecution with an updated status (immutable)."""
 
         return self.model_copy(update={"status": status, "updated_at": at, **changes})

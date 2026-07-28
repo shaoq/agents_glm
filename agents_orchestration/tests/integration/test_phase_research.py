@@ -29,10 +29,12 @@ NOW = datetime(2026, 7, 28, tzinfo=UTC)
 def _seed_run(backend, state: RunState = RunState.RESEARCHING, plan_version: int = 1) -> Run:
     run = Run(
         run_id=backend.idgen.new_id("run"),
-        raw_goal="g", state=state,
+        raw_goal="g",
+        state=state,
         policy=RunPolicy.from_limits(SystemLimits()),
         current_plan_version=plan_version,
-        created_at=NOW, updated_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
     )
     with backend.unit_of_work() as uow:
         uow.runs.save(run, expected_version=1)
@@ -42,10 +44,14 @@ def _seed_run(backend, state: RunState = RunState.RESEARCHING, plan_version: int
 
 def _seed_task(backend, run: Run, task_id: str, role: WorkerRole, state: TaskState) -> Task:
     task = Task(
-        task_id=task_id, run_id=run.run_id, plan_version=run.current_plan_version or 1,
-        worker_role=role, state=state,
+        task_id=task_id,
+        run_id=run.run_id,
+        plan_version=run.current_plan_version or 1,
+        worker_role=role,
+        state=state,
         required_capabilities=(CapabilityKind.RAG_SEARCH,),
-        created_at=NOW, updated_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
     )
     with backend.unit_of_work() as uow:
         uow.tasks.materialize([task])
@@ -135,9 +141,7 @@ async def test_research_in_flight_delegates_tick_and_progresses(backend) -> None
 async def test_research_all_succeeded_joins_to_analyzing(backend) -> None:
     run = _seed_run(backend, RunState.RESEARCHING)
     _seed_task(backend, run, "r1", WorkerRole.EVIDENCE_RESEARCHER, TaskState.SUCCEEDED)
-    coord = RunCoordinator(
-        backend, {PhaseId.RESEARCH: _research_handler(backend, _FakeTick())}
-    )
+    coord = RunCoordinator(backend, {PhaseId.RESEARCH: _research_handler(backend, _FakeTick())})
     report = await coord.advance(run.run_id)
     assert report.disposition is AdvanceDisposition.PROGRESSED
     assert report.to_state is RunState.ANALYZING
@@ -148,9 +152,7 @@ async def test_research_all_succeeded_joins_to_analyzing(backend) -> None:
 async def test_research_failed_task_degrades_idle(backend) -> None:
     run = _seed_run(backend, RunState.RESEARCHING)
     _seed_task(backend, run, "r1", WorkerRole.EVIDENCE_RESEARCHER, TaskState.FAILED)
-    coord = RunCoordinator(
-        backend, {PhaseId.RESEARCH: _research_handler(backend, _FakeTick())}
-    )
+    coord = RunCoordinator(backend, {PhaseId.RESEARCH: _research_handler(backend, _FakeTick())})
     report = await coord.advance(run.run_id)
     assert report.disposition is AdvanceDisposition.IDLE
     assert "failed" in report.reason

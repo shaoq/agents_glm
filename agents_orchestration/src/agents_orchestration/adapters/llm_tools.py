@@ -10,9 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
-def pydantic_to_tool(
-    model_cls: type[BaseModel], *, name: str, description: str
-) -> dict:
+def pydantic_to_tool(model_cls: type[BaseModel], *, name: str, description: str) -> dict:
     """Build a function-calling tool definition from a Pydantic model's JSON schema."""
 
     return {

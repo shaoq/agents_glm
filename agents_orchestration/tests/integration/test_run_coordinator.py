@@ -87,9 +87,13 @@ async def test_created_advances_to_normalizing(backend) -> None:
 @pytest.mark.integration
 async def test_terminal_run_reports_terminal_without_work(backend) -> None:
     coord = RunCoordinator(
-        backend, {PhaseId.GOAL: _FakeHandler(PhaseId.GOAL, PhaseOutcome(
-            AdvanceDisposition.PROGRESSED, next_state=RunState.PLANNING
-        ))}
+        backend,
+        {
+            PhaseId.GOAL: _FakeHandler(
+                PhaseId.GOAL,
+                PhaseOutcome(AdvanceDisposition.PROGRESSED, next_state=RunState.PLANNING),
+            )
+        },
     )
     run = _seed(backend, RunState.SUCCEEDED)
     report = await coord.advance(run.run_id)

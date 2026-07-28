@@ -22,8 +22,13 @@ async def test_offline_coordinator_wires_all_phases(backend) -> None:
     from agents_orchestration.domain.coordination import PhaseId
 
     for phase in (
-        PhaseId.GOAL, PhaseId.PLAN, PhaseId.RESEARCH, PhaseId.ANALYZE,
-        PhaseId.WRITE, PhaseId.REVIEW, PhaseId.FINALIZE,
+        PhaseId.GOAL,
+        PhaseId.PLAN,
+        PhaseId.RESEARCH,
+        PhaseId.ANALYZE,
+        PhaseId.WRITE,
+        PhaseId.REVIEW,
+        PhaseId.FINALIZE,
     ):
         assert phase in coord.handlers
 
@@ -32,9 +37,12 @@ async def test_offline_coordinator_wires_all_phases(backend) -> None:
 async def test_offline_composition_drives_clear_goal_to_succeeded(backend) -> None:
     coord = build_offline_coordinator(backend)
     run = Run(
-        run_id=backend.idgen.new_id("run"), raw_goal="analyze X clearly",
-        state=RunState.NORMALIZING, policy=RunPolicy.from_limits(SystemLimits()),
-        created_at=NOW, updated_at=NOW,
+        run_id=backend.idgen.new_id("run"),
+        raw_goal="analyze X clearly",
+        state=RunState.NORMALIZING,
+        policy=RunPolicy.from_limits(SystemLimits()),
+        created_at=NOW,
+        updated_at=NOW,
     )
     with backend.unit_of_work() as uow:
         uow.runs.save(run, expected_version=1)
