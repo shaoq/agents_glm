@@ -14,12 +14,12 @@
 
 ## 3. LLM Phase Ports (function calling)
 
-- [ ] 3.1 `LLMGoalNormalizer`: prompt + tool schema for `GoalNormalizationOutcome`; material ambiguity → `GoalClarificationProposal`; parse → Pydantic; failure raises provider error (handler degrades)
-- [ ] 3.2 `LLMPlanner`: prompt + tool schema for `PlanProposal` (TaskSpec[] + deliverables); parse → Pydantic; deterministic PlanValidator/PlanAcceptor unchanged
-- [ ] 3.3 `LLMAnalyst`: prompt + tool schema for `AnalysisArtifact` (evidence-linked conclusions); receives `EvidenceSet`
-- [ ] 3.4 `LLMReportWriter`: long-form markdown — evaluate function calling vs plain-text `invoke` with `[N]` citation markers; choose the more reliable for long output (Open Question)
-- [ ] 3.5 `LLMReportReviewer`: prompt + tool schema for `ReviewProposal` (PASS/REVISE/RESEARCH_GAP/CONFLICT/ESCALATE); route verdict via existing `map_review_verdict`
-- [ ] 3.6 Research LLM knowledge source (R1): `EvidenceResearcher` Task backed by MODEL capability, producing `Evidence(source_kind=MODEL, is_untrusted=True)`; run-summary discloses model-knowledge origin
+- [x] 3.1 `LLMGoalNormalizer`: prompt + tool schema for `GoalNormalizationOutcome`; material ambiguity → `GoalClarificationProposal`; parse → Pydantic; failure raises provider error (handler degrades)
+- [x] 3.2 `LLMPlanner`: prompt + tool schema for `PlanProposal` (TaskSpec[] + deliverables); parse → Pydantic; deterministic PlanValidator/PlanAcceptor unchanged
+- [x] 3.3 `LLMAnalyst`: prompt + tool schema for `AnalysisArtifact` (evidence-linked conclusions); receives `EvidenceSet`
+- [x] 3.4 `LLMReportWriter`: long-form markdown — evaluate function calling vs plain-text `invoke` with `[N]` citation markers; choose the more reliable for long output (Open Question)
+- [x] 3.5 `LLMReportReviewer`: prompt + tool schema for `ReviewProposal` (PASS/REVISE/RESEARCH_GAP/CONFLICT/ESCALATE); route verdict via existing `map_review_verdict`
+- [x] 3.6 Research LLM knowledge source (R1): `EvidenceResearcher` Task backed by MODEL capability, producing `Evidence(source_kind=MODEL, is_untrusted=True)`; run-summary discloses model-knowledge origin
 
 ## 4. Production Composition & CLI
 
