@@ -55,3 +55,31 @@ async def test_offline_composition_drives_clear_goal_to_succeeded(backend) -> No
         assert final.state is RunState.SUCCEEDED
         assert len(uow.artifacts.list_all()) == 3  # report.md / report.json / run-summary.json
         uow.commit()
+
+
+@pytest.mark.integration
+def test_production_composition_rejects_incomplete(backend) -> None:
+    """Task 9.8: a production profile with a missing required port must fail
+    loudly rather than silently substituting a Fake."""
+
+    from agents_orchestration.orchestration.composition import (
+        CompositionError,
+        build_production_coordinator,
+    )
+
+    with pytest.raises(CompositionError, match="missing"):
+        build_production_coordinator(
+            backend,
+            executor=None,
+            normalizer=None,
+            planner=None,
+            analyst=None,
+            writer=None,
+            reviewer=None,
+            research_evidence=None,
+            evidence_set=None,
+            analysis_provider=None,
+            report_provider=None,
+            deliverables_provider=None,
+            allowed_capabilities=frozenset(),
+        )

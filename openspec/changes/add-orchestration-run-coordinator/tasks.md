@@ -107,12 +107,12 @@
 - [x] 9.1 Define a composition configuration that distinguishes deterministic Fake and production profiles
 - [x] 9.2 Build the deterministic offline composition with all required phase ports and role handlers
 - [x] 9.3 Add composition tests proving the offline profile imports and calls no live network stack
-- [ ] 9.4 Build production composition for Model, Memory, RAG, and optional Web adapters
-- [ ] 9.5 Wire GoalNormalizer and Planner to configured model profiles through proposal-only ports
+- [x] 9.4 Build production composition for Model, Memory, RAG, and optional Web adapters
+- [x] 9.5 Wire GoalNormalizer and Planner to configured model profiles through proposal-only ports
 - [x] 9.6 Wire EvidenceResearcher, Analyst, ReportWriter, and ReportReviewer to role-specific handlers
 - [x] 9.7 Wire Plan, Replan, Evidence Join, Gate, Completion, Report, Finalizer, Task Runtime, and RunCoordinator
-- [ ] 9.8 Reject incomplete production composition instead of silently falling back to Fake providers
-- [ ] 9.9 Add secret-safe capability and composition diagnostics
+- [x] 9.8 Reject incomplete production composition instead of silently falling back to Fake providers
+- [x] 9.9 Add secret-safe capability and composition diagnostics
 - [x] 9.10 Verify all Capability calls still pass through Worker permissions, Run Policy, and Capability Router
 
 ## 10. Application Service, CLI, and Watch
@@ -125,7 +125,7 @@
 - [x] 10.6 Change RuntimeWatch to loop RunCoordinator advances and honor PROGRESSED/BLOCKED/IDLE/TERMINAL
 - [x] 10.7 Add Watch tests for non-Task phases, open Gates, idle polling, cancellation, maximum advances, and terminal Runs
 - [x] 10.8 Route `run start` to start_and_drive and `--create-only` to create_run
-- [ ] 10.9 Make `--follow` control event presentation without changing execution semantics
+- [x] 10.9 Make `--follow` control event presentation without changing execution semantics
 - [x] 10.10 Route `runtime tick RUN_ID` to one bounded RunCoordinator advance
 - [x] 10.11 Route selected and global `runtime watch` through coordinator-backed Watch
 - [x] 10.12 Remove CLI arbitrary `run resume --target` and use resume_and_drive continuation semantics

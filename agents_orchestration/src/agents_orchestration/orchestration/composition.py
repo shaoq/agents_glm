@@ -205,7 +205,84 @@ def build_offline_coordinator(backend) -> RunCoordinator:
     return RunCoordinator(backend, handlers)
 
 
+def build_production_coordinator(
+    backend,
+    *,
+    executor,
+    normalizer,
+    planner,
+    analyst,
+    writer,
+    reviewer,
+    research_evidence,
+    evidence_set,
+    analysis_provider,
+    report_provider,
+    deliverables_provider,
+    allowed_capabilities,
+    limits: SystemLimits | None = None,
+    approval_required: bool = False,
+) -> RunCoordinator:
+    """Production composition root (tasks 9.4/9.5/9.8).
+
+    Every phase port (model-backed GoalNormalizer/Planner/Analyst/Writer/
+    Reviewer) and provider is supplied by the caller — the composition root
+    only wires them. It MUST fail loudly when a required port is missing rather
+    than silently substituting a Fake (task 9.8); secret-safe capability
+    diagnostics come from ``capability_doctor`` (task 9.9). Model-backed port
+    implementations (LLM prompt + structured-output parse) are supplied by the
+    caller — they are prompt-engineering work, not composition wiring.
+    """
+
+    ports = {
+        "executor": executor,
+        "normalizer": normalizer,
+        "planner": planner,
+        "analyst": analyst,
+        "writer": writer,
+        "reviewer": reviewer,
+        "research_evidence": research_evidence,
+        "evidence_set": evidence_set,
+        "analysis_provider": analysis_provider,
+        "report_provider": report_provider,
+        "deliverables_provider": deliverables_provider,
+    }
+    missing = sorted(name for name, port in ports.items() if port is None)
+    if missing:
+        raise CompositionError(
+            f"production composition incomplete — missing required ports: {missing}"
+        )
+    sys_limits = limits or SystemLimits()
+    tick = RuntimeTick(backend, executor=executor, limits=sys_limits)
+    handlers = {
+        GoalPhaseHandler.phase: GoalPhaseHandler(normalizer, backend.idgen),
+        PlanningPhaseHandler.phase: PlanningPhaseHandler(
+            planner, limits=sys_limits, allowed_capabilities=allowed_capabilities,
+            clock=backend.clock, idgen=backend.idgen, approval_required=approval_required,
+        ),
+        ResearchPhaseHandler.phase: ResearchPhaseHandler(
+            tick, research_evidence, clock=backend.clock, idgen=backend.idgen,
+        ),
+        AnalysisPhaseHandler.phase: AnalysisPhaseHandler(
+            tick, analyst, evidence_set, clock=backend.clock, idgen=backend.idgen,
+        ),
+        WritingPhaseHandler.phase: WritingPhaseHandler(
+            tick, writer, analysis_provider, clock=backend.clock, idgen=backend.idgen,
+        ),
+        ReviewPhaseHandler.phase: ReviewPhaseHandler(
+            tick, reviewer, report_provider, clock=backend.clock, idgen=backend.idgen,
+        ),
+        FinalizePhaseHandler.phase: FinalizePhaseHandler(
+            report_provider=report_provider, analysis_provider=analysis_provider,
+            evidence_provider=evidence_set, deliverables_provider=deliverables_provider,
+            clock=backend.clock, idgen=backend.idgen,
+        ),
+    }
+    return RunCoordinator(backend, handlers)
+
+
 __all__ = [
     "CompositionError",
     "build_offline_coordinator",
+    "build_production_coordinator",
 ]

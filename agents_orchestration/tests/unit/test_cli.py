@@ -136,6 +136,17 @@ def test_run_start_drives_to_succeeded(runner, patched) -> None:
     assert payload["state"] == "succeeded"
 
 
+@pytest.mark.unit
+def test_run_start_follow_does_not_change_execution(runner, patched) -> None:
+    # task 10.9: --follow presents events without changing execution semantics
+    result = runner.invoke(
+        cli_mod.app,
+        ["run", "start", "--goal", "clear goal", "--request-id", "rf", "--follow"],
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["state"] == "succeeded"
+
+
 # --- 11.11 CLI delegates to Application (no duplicated domain logic) --------
 
 

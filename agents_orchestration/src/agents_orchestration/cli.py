@@ -84,6 +84,21 @@ def run_start(
             # event presentation, not execution semantics (task 10.9).
             run = asyncio.run(svc.start_and_drive(goal, request_id=request_id))
         typer.echo(run.model_dump_json())
+        if follow and not create_only:
+            # task 10.9: present recent events without changing execution
+            with svc.backend.unit_of_work() as uow:
+                events = list(uow.events.stream(run.run_id))[-20:]
+                uow.commit()
+            typer.echo(
+                json.dumps(
+                    [
+                        {"effect": e.effect.value, "state_version": e.state_version}
+                        for e in events
+                    ],
+                    ensure_ascii=False,
+                ),
+                err=True,
+            )
     except Exception as exc:  # noqa: BLE001 - stable CLI error mapping
         typer.echo(_diagnostic(exc), err=True)
         raise typer.Exit(code=_exit_for(exc)) from None
