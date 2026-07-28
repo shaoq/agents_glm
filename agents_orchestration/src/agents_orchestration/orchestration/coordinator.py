@@ -10,6 +10,17 @@ the coordinator captures input versions in a short read, the handler's async
 handler's ``accept`` performs phase-specific persistence (GoalSpec/Contract,
 Plan/Tasks, …) inside the write transaction while the coordinator records the
 stage record, Event, and semantic Checkpoint atomically.
+
+Recovery rules (task 11.1): the coordinator is state-driven — a process restart
+reloads durable Run/Task/Stage state and resumes from ``phase_for_state``.
+Per phase: CREATED re-initializes; Goal/Plan re-read persisted GoalSpec/Contract
+and Plan; Research/Analyze/Write/Review re-drive eligible Tasks (the Task
+Runtime keeps Attempt/Lease/retry); Finalize re-evaluates Completion. Per
+StageExecution status: ACCEPTED results are reused (idempotent prepare, one per
+run+logical_stage+fingerprint) so a provider is never re-invoked for already-
+accepted work; PREPARED records with an unknown external outcome are re-executed
+on the next advance (never assumed successful); REJECTED/FAILED/SUPERSEDED are
+retained as observations.
 """
 
 from __future__ import annotations

@@ -53,12 +53,12 @@ async def test_resume_and_drive_restores_origin_and_completes(
 ) -> None:
     run = service.create_run("clear goal", request_id="r2")
     await service.advance_run(run.run_id)  # NORMALIZING
-    paused = service.pause_run(run.run_id, expected_version=service.get_run(run.run_id).state_version)
+    paused = service.pause_run(
+        run.run_id, expected_version=service.get_run(run.run_id).state_version
+    )
     assert paused.state is RunState.PAUSED
 
-    resumed = await service.resume_and_drive(
-        run.run_id, expected_version=paused.state_version
-    )
+    resumed = await service.resume_and_drive(run.run_id, expected_version=paused.state_version)
     assert resumed.state is RunState.SUCCEEDED  # 8.11: drives to terminal
 
 
@@ -76,14 +76,23 @@ async def test_resume_rejects_non_paused_run(service: OrchestrationService) -> N
 def test_gate_expiry_marks_open_gate_expired(tmp_path) -> None:
     backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
     run = Run(
-        run_id=backend.idgen.new_id("run"), raw_goal="g", state=RunState.NORMALIZING,
-        policy=RunPolicy.from_limits(SystemLimits()), created_at=NOW, updated_at=NOW,
+        run_id=backend.idgen.new_id("run"),
+        raw_goal="g",
+        state=RunState.NORMALIZING,
+        policy=RunPolicy.from_limits(SystemLimits()),
+        created_at=NOW,
+        updated_at=NOW,
     )
     with backend.unit_of_work() as uow:
         uow.runs.save(run, expected_version=1)
         GateService(uow, backend.clock, backend.idgen).open(
-            run, GateType.GOAL_CLARIFICATION, actor="system", role="orchestrator",
-            scope=run.run_id, allowed_response_schema="{}", ttl_seconds=0,
+            run,
+            GateType.GOAL_CLARIFICATION,
+            actor="system",
+            role="orchestrator",
+            scope=run.run_id,
+            allowed_response_schema="{}",
+            ttl_seconds=0,
             continuation=build_gate_continuation(GateType.GOAL_CLARIFICATION, run),
         )
         uow.commit()

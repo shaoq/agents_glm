@@ -69,7 +69,7 @@
 - [x] 6.8 Implement accepted research result loading and deterministic Evidence Join
 - [x] 6.9 Persist the EvidenceSet as an immutable stage output bound to active Plan and Attempt results
 - [x] 6.10 Implement Research outcomes for ANALYZING, focused Replan, conflict Gate, degradation, and failure
-- [ ] 6.11 Add tests proving Replan preserves unaffected accepted results and rejects late superseded results
+- [x] 6.11 Add tests proving Replan preserves unaffected accepted results and rejects late superseded results
 
 ## 7. Analyze, Write, Review, and Finalize Phases
 
@@ -134,7 +134,7 @@
 
 ## 11. Recovery and Compatibility
 
-- [ ] 11.1 Define recovery rules for each Run phase and StageExecution status
+- [x] 11.1 Define recovery rules for each Run phase and StageExecution status
 - [x] 11.2 Add restart tests before prepare, after prepare, after provider return, after acceptance, and after transition
 - [x] 11.3 Implement accepted stage result reuse by logical key and input fingerprint
 - [ ] 11.4 Implement recovery handling for PREPARED executions with unknown external outcomes
