@@ -1,11 +1,11 @@
 ## 1. Baseline and Architecture Contracts
 
-- [ ] 1.1 Record the current public CLI and OrchestrationService behavior in characterization tests
-- [ ] 1.2 Add a failing public-boundary test proving a clear Goal currently remains in NORMALIZING
-- [ ] 1.3 Add architecture tests for the Application → RunCoordinator → Task Runtime dependency direction
-- [ ] 1.4 Add architecture tests preventing CLI and phase handlers from importing SQLite implementations directly
-- [ ] 1.5 Add architecture tests preventing sibling projects from depending on agents_orchestration
-- [ ] 1.6 Run GitNexus impact analysis for every existing symbol selected for modification and record risk
+- [x] 1.1 Record the current public CLI and OrchestrationService behavior in characterization tests
+- [x] 1.2 Add a failing public-boundary test proving a clear Goal currently remains in NORMALIZING
+- [x] 1.3 Add architecture tests for the Application → RunCoordinator → Task Runtime dependency direction
+- [x] 1.4 Add architecture tests preventing CLI and phase handlers from importing SQLite implementations directly
+- [x] 1.5 Add architecture tests preventing sibling projects from depending on agents_orchestration
+- [x] 1.6 Run GitNexus impact analysis for every existing symbol selected for modification and record risk
 
 ## 2. Coordination Domain Contracts
 

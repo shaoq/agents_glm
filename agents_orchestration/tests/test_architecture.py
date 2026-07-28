@@ -15,6 +15,8 @@ import ast
 import subprocess
 from pathlib import Path
 
+import pytest
+
 PKG_ROOT = Path(__file__).parents[1]
 SRC = PKG_ROOT / "src" / "agents_orchestration"
 
@@ -46,6 +48,24 @@ def _import_roots(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
     return roots
+
+
+def _imported_modules(path: Path) -> set[str]:
+    """Return the set of fully-qualified imported module names in ``path``.
+
+    Unlike :func:`_import_roots`, this preserves the full dotted path so layer
+    rules such as "runtime must not import agents_orchestration.application"
+    can be checked precisely.
+    """
+
+    module = ast.parse(path.read_text(encoding="utf-8"))
+    mods: set[str] = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            mods.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            mods.add(node.module)
+    return mods
 
 
 def _python_files() -> list[Path]:
@@ -166,3 +186,71 @@ def test_runtime_storage_ignore_does_not_hide_source_package() -> None:
     assert source.returncode == 1
     assert runtime.returncode == 0
     assert artifacts.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Task 1.3 — Application → RunCoordinator → Task Runtime dependency direction
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_does_not_import_application_layer() -> None:
+    """The Task Runtime / persistence must not depend back up to the
+    Application layer (task 1.3). The future RunCoordinator (Ch.4) sits between
+    Application and Task Runtime and MUST inherit this same downward direction:
+    Application → RunCoordinator → Task Runtime — never the reverse."""
+
+    for path in (SRC / "runtime").rglob("*.py"):
+        offenders = {
+            m
+            for m in _imported_modules(path)
+            if m == "agents_orchestration.application"
+            or m.startswith("agents_orchestration.application.")
+        }
+        assert not offenders, (
+            f"{path.name}: runtime imports application layer -> {sorted(offenders)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 1.4 — CLI and phase handlers must not import SQLite implementations
+# ---------------------------------------------------------------------------
+
+
+def test_cli_and_phase_handlers_isolate_sqlite() -> None:
+    """``cli.py`` and the orchestration phase handlers must depend on ports and
+    repositories, never on ``sqlite3`` directly (task 1.4). SQLite is confined
+    to ``runtime/persistence``; every other layer goes through the UnitOfWork."""
+
+    forbidden = {"sqlite3"}
+    targets: list[Path] = [SRC / "cli.py"]
+    targets += sorted((SRC / "orchestration").rglob("*.py"))
+    for path in targets:
+        offenders = _import_roots(path) & forbidden
+        assert not offenders, f"{path.name}: direct sqlite3 import -> {sorted(offenders)}"
+
+
+# ---------------------------------------------------------------------------
+# Task 1.5 — sibling projects must not depend on agents_orchestration
+# ---------------------------------------------------------------------------
+
+
+def test_sibling_projects_do_not_depend_on_orchestration() -> None:
+    """``agents_memory`` / ``agents_rag`` must never import
+    ``agents_orchestration`` (task 1.5). The orchestrator depends on their
+    public APIs; the reverse would invert the dependency direction."""
+
+    repo_root = PKG_ROOT.parent
+    for sibling in ("agents_memory", "agents_rag"):
+        sibling_src = repo_root / sibling / "src"
+        if not sibling_src.exists():
+            pytest.skip(f"{sibling}/src not present in this worktree")
+        for path in sorted(sibling_src.rglob("*.py")):
+            offenders = {
+                m
+                for m in _imported_modules(path)
+                if m == "agents_orchestration" or m.startswith("agents_orchestration.")
+            }
+            assert not offenders, (
+                f"{sibling}/{path.relative_to(sibling_src)}: sibling imports "
+                f"agents_orchestration -> {sorted(offenders)}"
+            )
