@@ -9,15 +9,15 @@
 
 ## 2. Coordination Domain Contracts
 
-- [ ] 2.1 Add tests for AdvanceDisposition values PROGRESSED, BLOCKED, IDLE, and TERMINAL
-- [ ] 2.2 Implement immutable AdvanceReport with Run, state, version, reason, and optional Task tick data
-- [ ] 2.3 Add tests for deterministic RunState-to-phase routing
-- [ ] 2.4 Implement phase identifiers and the fixed phase routing table
-- [ ] 2.5 Add tests for logical stage keys and input fingerprints
-- [ ] 2.6 Implement StageExecution status and version/hash binding models
-- [ ] 2.7 Add tests for phase result acceptance against state, plan, contract, and artifact versions
-- [ ] 2.8 Implement deterministic phase acceptance and stale-result classification
-- [ ] 2.9 Add tests proving model or evidence content cannot select a formal next Run state
+- [x] 2.1 Add tests for AdvanceDisposition values PROGRESSED, BLOCKED, IDLE, and TERMINAL
+- [x] 2.2 Implement immutable AdvanceReport with Run, state, version, reason, and optional Task tick data
+- [x] 2.3 Add tests for deterministic RunState-to-phase routing
+- [x] 2.4 Implement phase identifiers and the fixed phase routing table
+- [x] 2.5 Add tests for logical stage keys and input fingerprints
+- [x] 2.6 Implement StageExecution status and version/hash binding models
+- [x] 2.7 Add tests for phase result acceptance against state, plan, contract, and artifact versions
+- [x] 2.8 Implement deterministic phase acceptance and stale-result classification
+- [x] 2.9 Add tests proving model or evidence content cannot select a formal next Run state
 
 ## 3. Stage Execution Persistence
 
