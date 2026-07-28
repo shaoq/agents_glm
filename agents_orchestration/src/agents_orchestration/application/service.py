@@ -42,6 +42,14 @@ class ExportedArtifact:
     data: bytes
 
 
+@dataclass(frozen=True)
+class StartRunCommand:
+    """Typed input for the unified create-and-drive entry (task 10.2)."""
+
+    raw_goal: str
+    request_id: str
+
+
 class DefaultWorkerHandler:
     """Invoke the task's first registered capability and wrap it in a TaskResult.
 
@@ -121,6 +129,14 @@ class OrchestrationService:
         run_policy: RunPolicy | None = None,
         state: RunState = RunState.NORMALIZING,
     ) -> Run:
+        import warnings
+
+        warnings.warn(
+            "OrchestrationService.start_run is deprecated; use create_run + "
+            "start_and_drive (task 10.5).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         with self.backend.unit_of_work() as uow:
             existing = uow.dedup.recall(request_id)
             if isinstance(existing, str):
@@ -242,6 +258,11 @@ class OrchestrationService:
             raise RuntimeError(f"run {run.run_id} disappeared after drive")
         return result
 
+    async def start(self, command: StartRunCommand) -> Run:
+        """Typed create-and-drive entry (task 10.2)."""
+
+        return await self.start_and_drive(command.raw_goal, request_id=command.request_id)
+
     async def resume_and_drive(self, run_id: str, *, expected_version: int) -> Run:
         """Resume a paused Run from its persisted continuation (the phase it was
         paused from) and drive to terminal/blocked (tasks 8.10/8.11). The target
@@ -331,4 +352,5 @@ __all__ = [
     "DuplicateStartError",
     "ExportedArtifact",
     "OrchestrationService",
+    "StartRunCommand",
 ]
