@@ -75,7 +75,9 @@ class GoalPhaseHandler:
 
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         try:
-            outcome = await self.normalizer.normalize(ctx.run.raw_goal, ctx.run.run_id)
+            # task 4.1: normalize the effective goal (raw goal + clarification) so a
+            # clarified Gate response re-enters normalization as new phase input.
+            outcome = await self.normalizer.normalize(ctx.run.effective_goal, ctx.run.run_id)
         except Exception as exc:  # provider failure -> degrade (task 5.2)
             return PhaseOutcome(
                 disposition=AdvanceDisposition.IDLE,

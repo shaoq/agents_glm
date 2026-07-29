@@ -268,7 +268,9 @@ def test_gate_single_use_consume() -> None:
         expires_at=NOW + timedelta(seconds=60),
     )
     assert gate.is_open
-    responded = gate.respond(request_id="req1", actor="user", payload={"ok": True}, at=NOW)
+    responded = gate.respond(
+        request_id="req1", actor="user", payload={"outcome": "approved"}, at=NOW
+    )
     assert responded.state is GateState.RESPONDED
     consumed = responded.consume(at=NOW)
     assert consumed.is_consumed

@@ -32,6 +32,16 @@ def _seed_research_run(service: OrchestrationService, request_id: str, task_id="
     return run, contract
 
 
+# A legal typed payload per Gate type, used where a test only needs to clear
+# response validation without exercising a specific outcome's business content.
+_LEGAL_RESPONSE_PAYLOAD: dict[GateType, dict[str, str]] = {
+    GateType.GOAL_CLARIFICATION: {"outcome": "clarified", "clarification": "c"},
+    GateType.PLAN_APPROVAL: {"outcome": "approved"},
+    GateType.CONFLICT_RESOLUTION: {"outcome": "resolved", "resolution": "r"},
+    GateType.FINAL_REVIEW: {"outcome": "approved"},
+}
+
+
 # --- 13.2 all four gate types block the run and resume after consume --------
 
 
@@ -46,7 +56,6 @@ async def test_each_gate_type_blocks_and_resumes(service, gate_type) -> None:
             actor="user",
             role="approver",
             scope="run",
-            allowed_response_schema="{}",
             ttl_seconds=3600,
         )
         uow.commit()
@@ -63,7 +72,7 @@ async def test_each_gate_type_blocks_and_resumes(service, gate_type) -> None:
             request_id="rq-" + gate_type.value,
             actor="user",
             role="approver",
-            payload={},
+            payload=_LEGAL_RESPONSE_PAYLOAD[gate_type],
         )
         consumed = svc.consume(responded)
         uow.commit()

@@ -96,9 +96,10 @@ agents-orchestration run pause RUN_ID --expected-version N
 agents-orchestration run resume RUN_ID --expected-version N --target researching
 agents-orchestration run cancel RUN_ID --expected-version N
 
-# Human Gate
+# Human Gate（响应 payload 为类型化契约，见“Gate 工作流”）
 agents-orchestration gate list RUN_ID
-agents-orchestration gate respond GATE_ID --request-id rq --actor user --role approver --payload '{"ok":true}'
+agents-orchestration gate respond GATE_ID --request-id rq --actor user --role approver \
+    --payload '{"outcome":"approved"}'
 
 # Artifact（内容寻址、hash 校验）
 agents-orchestration artifact list
@@ -129,7 +130,7 @@ service = OrchestrationService(backend)
 run = service.start_run("研究 X", request_id="req-1")     # 幂等（Request ID 去重）
 await service.drive_run(run.run_id)                        # 持续推进直到终态或阻塞
 service.pause_run(run.run_id, expected_version=run.state_version)
-service.respond_gate(gate_id, request_id="rq", actor="user", role="approver", payload={})
+service.respond_gate(gate_id, request_id="rq", actor="user", role="approver", payload={"outcome": "approved"})
 exported = service.export_artifact(artifact_id)            # hash 校验后返回字节
 ```
 
@@ -146,6 +147,27 @@ exported = service.export_artifact(artifact_id)            # hash 校验后返�
 `state_version` / `plan_version` / `artifact_hash`，响应经 Request ID 去重、**单次消费**；到期触发
 配置动作（cancel/fail/partial/default/escalate）。开 Gate 后 Run 阻塞；消费后以**新的 Attempt/Lease**
 恢复，绝不延续旧进程。
+
+响应 payload 是**类型化契约**（按 Gate 类型 + `outcome` 区分）：缺失/未知 `outcome`、缺失或空白必填
+字段、未声明字段、错误类型都会返回稳定错误，Gate 保持 OPEN、Run 不变。合法 outcome 与必填字段：
+
+| Gate | `outcome` | 必填业务字段 |
+|---|---|---|
+| `GOAL_CLARIFICATION` | `clarified` | 非空 `clarification` |
+| `GOAL_CLARIFICATION` | `cancelled` | 无（可选 `reason`） |
+| `PLAN_APPROVAL` | `approved` | 无（可选 `comment`） |
+| `PLAN_APPROVAL` | `rejected` | 非空 `feedback` |
+| `CONFLICT_RESOLUTION` | `resolved` | 非空 `resolution` |
+| `CONFLICT_RESOLUTION` | `escalated` | 非空 `reason` |
+| `FINAL_REVIEW` | `approved` | 无（可选 `comment`） |
+| `FINAL_REVIEW` | `changes` | 非空 `feedback` |
+
+消费在单个 Unit of Work 内原子完成：Gate `RESPONDED`→`CONSUMED`、Run 转换/澄清（`clarified` 把
+`clarification` 作为 `effective_goal` 上下文叠加到 `raw_goal` 之上，`raw_goal` 始终不变）、基于原
+`state_version` 的**单次 CAS** 保存，以及 `RUN_RESUMED`（状态改变追加 `RUN_STATE_TRANSITION`、终态
+追加 `RUN_TERMINATED`）。无法安全应用的响应（continuation 缺失 / 版本 stale / 未知 outcome / 非法
+转换）使 Gate 失效（`CANCELED` + `GATE_INVALIDATED`）而不改动 Run。`respond_gate` 同步返回、**不自动
+驱动**；消费后需显式 `advance_run` / `drive_run` / `runtime watch` 创建新的执行 claim。
 
 ## 恢复（Restart）
 

@@ -167,3 +167,70 @@ def test_cli_module_does_not_reimplement_domain_logic() -> None:
         "def has_cycle",
     ):
         assert forbidden not in source, f"cli.py reimplements domain logic: {forbidden}"
+
+
+# --- 11.5 gate respond: typed payload, stable exit codes (task 5.3) --------
+
+
+def _open_plan_approval_gate(service) -> tuple[str, str]:
+    from agents_orchestration.domain.coordination import build_gate_continuation
+    from agents_orchestration.domain.enums import GateType, RunState
+    from agents_orchestration.domain.execution import Run
+    from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+    from agents_orchestration.orchestration.gates import GateService
+
+    now = service.backend.clock.now()
+    run = Run(
+        run_id=service.backend.idgen.new_id("run"),
+        raw_goal="g",
+        state=RunState.PLANNING,
+        policy=RunPolicy.from_limits(SystemLimits()),
+        current_plan_version=1,
+        created_at=now,
+        updated_at=now,
+    )
+    with service.backend.unit_of_work() as uow:
+        uow.runs.save(run, expected_version=1)
+        gate = GateService(uow, service.backend.clock, service.backend.idgen).open(
+            run,
+            GateType.PLAN_APPROVAL,
+            actor="approver",
+            role="approver",
+            scope="plan",
+            continuation=build_gate_continuation(GateType.PLAN_APPROVAL, run),
+        )
+        uow.commit()
+    return run.run_id, gate.gate_id
+
+
+@pytest.mark.unit
+def test_gate_respond_valid_payload_consumes_and_advances_run(runner, patched, service) -> None:
+    run_id, gate_id = _open_plan_approval_gate(service)
+    result = runner.invoke(
+        cli_mod.app,
+        [
+            "gate", "respond", gate_id,
+            "--request-id", "rq1", "--actor", "approver", "--role", "approver",
+            "--payload", '{"outcome": "approved"}',
+        ],
+    )
+    assert result.exit_code == 0
+    shown = runner.invoke(cli_mod.app, ["run", "show", run_id])  # PLANNING -> RESEARCHING
+    assert json.loads(shown.stdout)["state"] == "researching"
+
+
+@pytest.mark.unit
+def test_gate_respond_invalid_payload_returns_stable_error(runner, patched, service) -> None:
+    run_id, gate_id = _open_plan_approval_gate(service)
+    result = runner.invoke(
+        cli_mod.app,
+        [
+            "gate", "respond", gate_id,
+            "--request-id", "rq2", "--actor", "approver", "--role", "approver",
+            "--payload", '{"ok": true}',  # missing required 'outcome'
+        ],
+    )
+    assert result.exit_code == 1  # stable non-zero: Gate stays OPEN, Run unchanged
+    assert "outcome" in result.output or "GateResponseError" in result.output
+    shown = runner.invoke(cli_mod.app, ["run", "show", run_id])
+    assert json.loads(shown.stdout)["state"] == "planning"

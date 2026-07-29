@@ -386,7 +386,6 @@ class RunCoordinator:
             actor="system",
             role="orchestrator",
             scope=run.run_id,
-            allowed_response_schema="{}",
             continuation=cont,
         )
 

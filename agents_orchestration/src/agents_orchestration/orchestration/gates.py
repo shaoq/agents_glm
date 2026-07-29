@@ -18,11 +18,13 @@ from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.lifecycle import CheckpointKind, Gate, GateContinuation
 from agents_orchestration.domain.state_machine import assert_gate_consume, assert_gate_respond
+from agents_orchestration.orchestration.gate_responses import (
+    GateResponseError,
+    ValidatedGateResponse,
+    canonical_response_schema,
+    validate_gate_response,
+)
 from agents_orchestration.runtime.core import CheckpointService
-
-
-class GateResponseError(ValueError):
-    """Base for Gate response validation failures (task 9.4/9.8)."""
 
 
 class GateNotOpenError(GateResponseError):
@@ -45,6 +47,16 @@ class DuplicateGateResponseError(GateResponseError):
     pass
 
 
+class GateContinuationError(GateResponseError):
+    """A Gate response could not be safely applied to the Run (task 3.3).
+
+    The Gate has already been invalidated (CANCELED + ``GATE_INVALIDATED``) and
+    the Run is unchanged; this stable error is surfaced to the caller.
+    """
+
+    pass
+
+
 class GateService:
     def __init__(self, uow, clock, idgen, *, checkpoint: CheckpointService | None = None) -> None:
         self.uow = uow
@@ -60,7 +72,6 @@ class GateService:
         actor: str,
         role: str,
         scope: str,
-        allowed_response_schema: str,
         ttl_seconds: int = 3600,
         artifact_hash: str | None = None,
         task_id: str | None = None,
@@ -78,7 +89,7 @@ class GateService:
             plan_version=run.current_plan_version,
             task_id=task_id,
             artifact_hash=artifact_hash,
-            allowed_response_schema=allowed_response_schema,
+            allowed_response_schema=canonical_response_schema(gate_type),
             expires_at=now + timedelta(seconds=ttl_seconds),
             continuation=continuation,
         )
@@ -91,6 +102,44 @@ class GateService:
         )
         return gate
 
+    def validate_response(
+        self,
+        gate: Gate,
+        *,
+        request_id: str,
+        actor: str,
+        role: str,
+        payload: dict,
+        expected_artifact_hash: str | None = None,
+        allowed_actors: tuple[str, ...] | None = None,
+    ) -> ValidatedGateResponse:
+        """Run every pre-mutation check (task 1.3) and claim the Request ID.
+
+        Lifecycle, expiry, typed payload, actor/role/artifact and at-most-once
+        dedup are all enforced before any Gate/Run/event mutation. On success
+        the dedup claim is held in the Unit of Work and the typed payload is
+        returned; the caller commits RESPONDED/CONSUMED or CANCELED without a
+        second claim.
+        """
+
+        now = self.clock.now()
+        try:
+            assert_gate_respond(gate.state)
+        except ValueError as exc:
+            raise GateNotOpenError(str(exc)) from None
+        if gate.is_expired(now):
+            raise GateExpiredError(f"gate {gate.gate_id} expired")
+        validated = validate_gate_response(gate.gate_type, payload)
+        if allowed_actors is not None and actor not in allowed_actors:
+            raise GateUnauthorizedError(f"actor {actor} not permitted")
+        if gate.role != role:
+            raise GateUnauthorizedError(f"role {role} does not match {gate.role}")
+        if expected_artifact_hash is not None and gate.artifact_hash != expected_artifact_hash:
+            raise GateArtifactMismatchError("artifact hash mismatch")
+        if not self.uow.dedup.try_claim(request_id, run_id=gate.run_id, kind="gate_response"):
+            raise DuplicateGateResponseError(f"duplicate response {request_id}")
+        return validated
+
     def respond(
         self,
         gate: Gate,
@@ -102,22 +151,16 @@ class GateService:
         expected_artifact_hash: str | None = None,
         allowed_actors: tuple[str, ...] | None = None,
     ) -> Gate:
+        self.validate_response(
+            gate,
+            request_id=request_id,
+            actor=actor,
+            role=role,
+            payload=payload,
+            expected_artifact_hash=expected_artifact_hash,
+            allowed_actors=allowed_actors,
+        )
         now = self.clock.now()
-        try:
-            assert_gate_respond(gate.state)
-        except ValueError as exc:
-            raise GateNotOpenError(str(exc)) from None
-        if gate.is_expired(now):
-            raise GateExpiredError(f"gate {gate.gate_id} expired")
-        if allowed_actors is not None and actor not in allowed_actors:
-            raise GateUnauthorizedError(f"actor {actor} not permitted")
-        if gate.role != role:
-            raise GateUnauthorizedError(f"role {role} does not match {gate.role}")
-        if expected_artifact_hash is not None and gate.artifact_hash != expected_artifact_hash:
-            raise GateArtifactMismatchError("artifact hash mismatch")
-        if not self.uow.dedup.try_claim(request_id, run_id=gate.run_id, kind="gate_response"):
-            raise DuplicateGateResponseError(f"duplicate response {request_id}")
-
         responded = gate.respond(request_id=request_id, actor=actor, payload=payload, at=now)
         self.uow.gates.save(responded)
         self.uow.events.append([self._event_for(responded, EffectType.GATE_RESPONDED, now)])
@@ -192,6 +235,7 @@ class GateService:
 __all__ = [
     "DuplicateGateResponseError",
     "GateArtifactMismatchError",
+    "GateContinuationError",
     "GateExpiredError",
     "GateNotOpenError",
     "GateResponseError",

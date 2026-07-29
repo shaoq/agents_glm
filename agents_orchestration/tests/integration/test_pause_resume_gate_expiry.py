@@ -92,7 +92,6 @@ def test_gate_expiry_marks_open_gate_expired(tmp_path) -> None:
             actor="system",
             role="orchestrator",
             scope=run.run_id,
-            allowed_response_schema="{}",
             ttl_seconds=0,
             continuation=build_gate_continuation(GateType.GOAL_CLARIFICATION, run),
         )

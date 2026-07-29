@@ -56,7 +56,6 @@ async def test_drive_run_open_gate_blocks(service: OrchestrationService) -> None
             actor="system",
             role="orchestrator",
             scope=run.run_id,
-            allowed_response_schema="{}",
             continuation=build_gate_continuation(GateType.GOAL_CLARIFICATION, run),
         )
         uow.commit()

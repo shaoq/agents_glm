@@ -331,13 +331,45 @@ def build_gate_continuation(gate_type: GateType, run) -> GateContinuation:
     )
 
 
-def apply_gate_continuation(gate, run, outcome: str, now):
-    """Deterministically apply the Gate's continuation (task 8.5).
+class ContinuationOutcome(StrEnum):
+    """Discriminated result of resolving a Gate continuation (task 2.1).
 
-    Returns the possibly-transitioned Run. A Gate whose bound versions no
-    longer match the Run, or whose outcome has no mapping, advances nothing
-    (task 8.4 stale/unknown rejection). Callers never choose the target state
-    (task 8.7) — it comes solely from the persisted continuation.
+    Meanings are exhaustive and mutually exclusive so the Application layer
+    never infers intent from a returned Run object (design Decision 2):
+
+    - ``APPLIED``: a legal transition to a different state.
+    - ``SAME_STATE``: a legal resume that keeps the state but bumps the version.
+    - ``MISSING_CONTINUATION``: the Gate has no persisted continuation.
+    - ``STALE``: the bound state/plan version no longer matches the Run.
+    - ``UNKNOWN_OUTCOME``: the outcome is not in the continuation mapping.
+    - ``INVALID_TRANSITION``: the target state violates the Run state machine.
+    """
+
+    APPLIED = "applied"
+    SAME_STATE = "same_state"
+    MISSING_CONTINUATION = "missing_continuation"
+    STALE = "stale"
+    UNKNOWN_OUTCOME = "unknown_outcome"
+    INVALID_TRANSITION = "invalid_transition"
+
+
+@dataclass(frozen=True)
+class ContinuationResolution:
+    """The discriminated resolution plus the target state (when one exists)."""
+
+    outcome: ContinuationOutcome
+    target_state: RunState | None = None
+    reason: str = ""
+
+
+def resolve_gate_continuation(gate, run, outcome: str) -> ContinuationResolution:
+    """Classify how a Gate's continuation applies to ``run`` (task 2.1).
+
+    Pure and deterministic: reads only the persisted continuation and the Run's
+    versions/state. The Application layer consumes the explicit result rather
+    than guessing stale, same-state or invalid from a returned Run (design
+    Decision 2). Callers never choose the target state (task 8.7) — it comes
+    solely from the persisted continuation.
     """
 
     from agents_orchestration.domain.state_machine import (
@@ -347,28 +379,58 @@ def apply_gate_continuation(gate, run, outcome: str, now):
 
     cont = gate.continuation
     if cont is None:
-        return run
+        return ContinuationResolution(
+            ContinuationOutcome.MISSING_CONTINUATION, reason="gate has no continuation"
+        )
     if cont.bound_state_version != run.state_version:
-        return run  # stale state binding (task 8.4)
+        return ContinuationResolution(
+            ContinuationOutcome.STALE, reason="bound state version drifted"
+        )
     if cont.bound_plan_version is not None and cont.bound_plan_version != run.current_plan_version:
-        return run  # stale plan binding (e.g. after a Replan shifted the plan)
+        return ContinuationResolution(
+            ContinuationOutcome.STALE, reason="bound plan version drifted"
+        )
     target = cont.next_state_for(outcome)
     if target is None:
-        return run  # unknown outcome
+        return ContinuationResolution(
+            ContinuationOutcome.UNKNOWN_OUTCOME, reason=f"outcome '{outcome}' not mapped"
+        )
     target_state = RunState(target)
     if target_state is run.state:
-        return run
+        return ContinuationResolution(ContinuationOutcome.SAME_STATE, target_state=target_state)
     try:
         assert_run_transition(run.state, target_state)
     except StateTransitionError:
-        return run  # invalid continuation mapping — advance nothing
-    return run.transition(target_state, now)
+        return ContinuationResolution(
+            ContinuationOutcome.INVALID_TRANSITION,
+            target_state=target_state,
+            reason=f"illegal transition {run.state.value}->{target_state.value}",
+        )
+    return ContinuationResolution(ContinuationOutcome.APPLIED, target_state=target_state)
+
+
+def apply_gate_continuation(gate, run, outcome: str, now):
+    """Deterministically apply the Gate's continuation (task 8.5, delegated in 2.1).
+
+    Delegates to :func:`resolve_gate_continuation`. ``APPLIED`` transitions the
+    Run; ``SAME_STATE`` bumps the version in place (task 2.3); every other
+    resolution advances nothing and the original Run is returned unchanged.
+    """
+
+    resolution = resolve_gate_continuation(gate, run, outcome)
+    if resolution.outcome is ContinuationOutcome.APPLIED:
+        return run.transition(resolution.target_state, now)
+    if resolution.outcome is ContinuationOutcome.SAME_STATE:
+        return run.bump_version(now)
+    return run
 
 
 __all__ = [
     "AdvanceDisposition",
     "AdvanceReport",
     "CapturedVersions",
+    "ContinuationOutcome",
+    "ContinuationResolution",
     "GATE_CONTINUATION_NEXT",
     "InputFingerprint",
     "PHASE_FOR_STATE",
@@ -383,6 +445,7 @@ __all__ = [
     "classify_phase_result",
     "eligible_worker_roles",
     "phase_for_state",
+    "resolve_gate_continuation",
     "stage_idempotency_key",
     "stage_logical_key",
 ]

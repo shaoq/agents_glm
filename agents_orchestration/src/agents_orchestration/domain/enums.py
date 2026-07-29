@@ -203,6 +203,7 @@ class EffectType(StrEnum):
     GATE_RESPONDED = "gate_responded"
     GATE_CONSUMED = "gate_consumed"
     GATE_EXPIRED = "gate_expired"
+    GATE_INVALIDATED = "gate_invalidated"
     EVIDENCE_JOINED = "evidence_joined"
     CAPABILITY_INVOKED = "capability_invoked"
     ARTIFACT_RECORDED = "artifact_recorded"

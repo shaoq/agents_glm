@@ -48,6 +48,7 @@ class Run(BaseModel):
 
     run_id: RunId
     raw_goal: str
+    goal_clarification: str | None = None
     state: RunState = RunState.CREATED
     goal: GoalSpec | None = None
     completion: CompletionContract | None = None
@@ -65,6 +66,26 @@ class Run(BaseModel):
     @property
     def is_terminal(self) -> bool:
         return self.state.is_terminal
+
+    @property
+    def effective_goal(self) -> str:
+        """The raw goal augmented with any user clarification (task 2.2).
+
+        Without a clarification this is the raw goal verbatim; ``raw_goal`` is
+        never mutated, so the original input stays auditable.
+        """
+
+        if self.goal_clarification:
+            return f"{self.raw_goal}\n\nUser clarification:\n{self.goal_clarification}"
+        return self.raw_goal
+
+    def bump_version(self, at: datetime) -> Run:
+        """Same-state resume generation bump (task 2.3): state unchanged,
+        ``state_version`` advances exactly once, ``updated_at`` refreshes."""
+
+        return self.model_copy(
+            update={"state_version": self.state_version + 1, "updated_at": at}
+        )
 
     def transition(self, to: RunState, at: datetime) -> Run:
         return self.model_copy(

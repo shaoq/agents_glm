@@ -15,8 +15,14 @@ from agents_orchestration.capabilities.registry import CapabilityRegistry
 from agents_orchestration.capabilities.router import CapabilityRouter
 from agents_orchestration.domain.artifact import ArtifactRef
 from agents_orchestration.domain.capability import CapabilityRequest
-from agents_orchestration.domain.coordination import AdvanceDisposition, AdvanceReport
-from agents_orchestration.domain.enums import RunState, TerminationReason, WorkerRole
+from agents_orchestration.domain.coordination import (
+    AdvanceDisposition,
+    AdvanceReport,
+    ContinuationOutcome,
+    resolve_gate_continuation,
+)
+from agents_orchestration.domain.enums import EffectType, RunState, TerminationReason, WorkerRole
+from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Attempt, Run, Task
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
@@ -305,24 +311,190 @@ class OrchestrationService:
         with self.backend.unit_of_work() as uow:
             return list(uow.gates.open_for_run(run_id))
 
-    def respond_gate(self, gate_id: str, *, request_id: str, actor: str, role: str, payload: dict):
-        from agents_orchestration.orchestration.gates import GateService
+    def respond_gate(
+        self, gate_id: str, *, request_id: str, actor: str, role: str, payload: dict
+    ):
+        """Atomically consume a typed Gate response (tasks 3.1-3.4).
+
+        Loads Gate + Run, validates the typed payload and claims the Request ID,
+        resolves the persisted continuation, then either consumes normally
+        (Gate RESPONDED + CONSUMED, Run amendment/transition with a single CAS
+        save, durable resume/transition/terminal events) or invalidates the
+        Gate (CANCELED + ``GATE_INVALIDATED``, Run unchanged, stable
+        ``GateContinuationError``). ``advance_run``/``drive_run`` are never
+        called here — the caller drives the next step explicitly (design 6).
+        """
+
+        from agents_orchestration.orchestration.gates import (
+            GateContinuationError,
+            GateService,
+        )
 
         with self.backend.unit_of_work() as uow:
             gate = uow.gates.get(gate_id)
             if gate is None:
                 raise KeyError(gate_id)
+            run = uow.runs.get(gate.run_id)
+            if run is None:
+                raise KeyError(gate.run_id)
+            original_version = run.state_version
             svc = GateService(uow, self.backend.clock, self.backend.idgen)
-            responded = svc.respond(
-                gate,
-                request_id=request_id,
-                actor=actor,
-                role=role,
-                payload=payload,
+            validated = svc.validate_response(
+                gate, request_id=request_id, actor=actor, role=role, payload=payload
             )
-            consumed = svc.consume(responded)
+            now = self.backend.clock.now()
+            resolution = resolve_gate_continuation(gate, run, validated.outcome)
+
+            if resolution.outcome not in (
+                ContinuationOutcome.APPLIED,
+                ContinuationOutcome.SAME_STATE,
+            ):
+                self._invalidate_gate(uow, gate, validated, resolution, now)
+                uow.commit()
+                raise GateContinuationError(
+                    f"gate {gate.gate_id} invalidated: {resolution.outcome.value}"
+                )
+
+            responded = gate.respond(
+                request_id=request_id, actor=actor, payload=payload, at=now
+            )
+            consumed = responded.consume(now)
+            final_run = self._amend_run_for_gate(run, resolution, validated, now)
+            uow.gates.save(consumed)
+            uow.runs.save(final_run, expected_version=original_version)
+            uow.events.append(
+                self._gate_consumption_events(gate, consumed, validated, run, final_run, now)
+            )
             uow.commit()
             return consumed
+
+    def _invalidate_gate(self, uow, gate, validated, resolution, now) -> None:
+        """Fail a Gate whose continuation cannot be safely applied (task 3.3).
+
+        Gate -> CANCELED + ``GATE_INVALIDATED`` with the classified reason; the
+        Run and its target information are left untouched.
+        """
+
+        canceled = gate.cancel()
+        uow.gates.save(canceled)
+        uow.events.append(
+            [
+                DomainEvent(
+                    event_id=self.backend.idgen.new_id("evt"),
+                    run_id=gate.run_id,
+                    effect=EffectType.GATE_INVALIDATED,
+                    state_version=gate.state_version,
+                    occurred_at=now,
+                    gate_id=gate.gate_id,
+                    plan_version=gate.plan_version,
+                    payload={
+                        "gate_type": gate.gate_type.value,
+                        "outcome": validated.outcome,
+                        "reason": resolution.outcome.value,
+                        "detail": resolution.reason,
+                    },
+                )
+            ]
+        )
+
+    def _amend_run_for_gate(self, run, resolution, validated, now):
+        """Build the final Run from the original in one version bump (task 3.2/4.2).
+
+        APPLIED transitions (or terminates for cancelled/escalated); SAME_STATE
+        bumps the version in place; a clarified outcome additionally stores the
+        goal clarification. The original Run is never mutated.
+        """
+
+        if resolution.outcome is ContinuationOutcome.APPLIED:
+            target = resolution.target_state
+            if target.is_terminal:
+                reason = (
+                    TerminationReason.CANCELED
+                    if target is RunState.CANCELED
+                    else TerminationReason.FAILED
+                )
+                base = run.terminate(reason, now)
+            else:
+                base = run.transition(target, now)
+        else:  # SAME_STATE
+            base = run.bump_version(now)
+        if validated.clarification:
+            base = base.model_copy(update={"goal_clarification": validated.clarification})
+        return base
+
+    def _gate_consumption_events(
+        self, gate, consumed, validated, original_run, final_run, now
+    ) -> list[DomainEvent]:
+        """Durable events for a successful Gate consumption (task 3.4 / 6)."""
+
+        idgen = self.backend.idgen
+        common: dict[str, object] = {
+            "run_id": gate.run_id,
+            "occurred_at": now,
+            "gate_id": gate.gate_id,
+            "plan_version": gate.plan_version,
+        }
+        events = [
+            DomainEvent(
+                event_id=idgen.new_id("evt"),
+                effect=EffectType.GATE_RESPONDED,
+                state_version=gate.state_version,
+                payload={"gate_type": gate.gate_type.value},
+                **common,
+            ),
+            DomainEvent(
+                event_id=idgen.new_id("evt"),
+                effect=EffectType.GATE_CONSUMED,
+                state_version=gate.state_version,
+                payload={"gate_type": gate.gate_type.value},
+                **common,
+            ),
+            DomainEvent(
+                event_id=idgen.new_id("evt"),
+                effect=EffectType.RUN_RESUMED,
+                state_version=final_run.state_version,
+                payload={
+                    "gate_type": gate.gate_type.value,
+                    "outcome": validated.outcome,
+                    "from_state_version": original_run.state_version,
+                    "to_state_version": final_run.state_version,
+                },
+                **common,
+            ),
+        ]
+        if final_run.state is not original_run.state:
+            events.append(
+                DomainEvent(
+                    event_id=idgen.new_id("evt"),
+                    effect=EffectType.RUN_STATE_TRANSITION,
+                    state_version=final_run.state_version,
+                    payload={
+                        "from_state": original_run.state.value,
+                        "to_state": final_run.state.value,
+                        "gate_type": gate.gate_type.value,
+                        "outcome": validated.outcome,
+                    },
+                    **common,
+                )
+            )
+        if final_run.state.is_terminal:
+            events.append(
+                DomainEvent(
+                    event_id=idgen.new_id("evt"),
+                    effect=EffectType.RUN_TERMINATED,
+                    state_version=final_run.state_version,
+                    payload={
+                        "state": final_run.state.value,
+                        "termination": final_run.termination.value
+                        if final_run.termination
+                        else None,
+                        "gate_type": gate.gate_type.value,
+                        "outcome": validated.outcome,
+                    },
+                    **common,
+                )
+            )
+        return events
 
     # --- 11.6 artifacts ------------------------------------------------------
 

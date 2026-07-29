@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from agents_orchestration.application.service import OrchestrationService
 from agents_orchestration.domain.coordination import AdvanceDisposition, PhaseId
 from agents_orchestration.domain.enums import CapabilityKind, RunState, WorkerRole
 from agents_orchestration.domain.execution import Run
@@ -230,3 +231,73 @@ async def test_planning_approval_required_opens_plan_approval_gate(backend) -> N
         assert any(g.gate_type.value == "plan_approval" for g in gates)
         assert uow.tasks.get("t1") is None  # not materialized until the gate is approved
         uow.commit()
+
+
+# --- task 4.1 / 4.3: effective goal context flows into normalization -------
+
+
+@pytest.mark.integration
+async def test_goal_phase_normalizes_effective_goal_and_keeps_raw(backend) -> None:
+    received: list[str] = []
+
+    class _Recording:
+        async def normalize(self, raw_goal: str, run_id: str) -> GoalNormalizationOutcome:
+            received.append(raw_goal)
+            return GoalNormalizationOutcome(_goal(), _contract(), None)
+
+    run = _seed(backend, RunState.NORMALIZING)
+    with backend.unit_of_work() as uow:  # simulate a clarified consumption
+        clarified = uow.runs.get(run.run_id).model_copy(
+            update={"goal_clarification": "focus on pricing"}
+        )
+        uow.runs.save(clarified, expected_version=run.state_version)
+        uow.commit()
+    coord = RunCoordinator(backend, {PhaseId.GOAL: GoalPhaseHandler(_Recording(), backend.idgen)})
+    await coord.advance(run.run_id)
+    assert received == ["g\n\nUser clarification:\nfocus on pricing"]
+    with backend.unit_of_work() as uow:  # task 4.3: raw_goal is never overwritten
+        assert uow.runs.get(run.run_id).raw_goal == "g"
+        uow.commit()
+
+
+# --- task 4.4: clarification round-trip reaches PLANNING, no BLOCKED loop ----
+
+
+@pytest.mark.integration
+async def test_goal_clarification_round_trip_reaches_planning(backend) -> None:
+    class _ClarifyingNormalizer:
+        async def normalize(self, raw_goal: str, run_id: str) -> GoalNormalizationOutcome:
+            if "User clarification:" in raw_goal:
+                return GoalNormalizationOutcome(_goal(), _contract(), None)  # clarified -> clear
+            return GoalNormalizationOutcome(  # raw goal alone -> ambiguous
+                GoalSpec(raw_input=raw_goal, objective="", deliverables=("report.md",)),
+                _contract(),
+                GoalClarificationProposal(
+                    run_id=run_id, ambiguities=("objective",), questions=("objective?",)
+                ),
+            )
+
+    coord = RunCoordinator(
+        backend, {PhaseId.GOAL: GoalPhaseHandler(_ClarifyingNormalizer(), backend.idgen)}
+    )
+    service = OrchestrationService(backend, coordinator=coord)
+    run = _seed(backend, RunState.NORMALIZING)
+
+    blocked = await service.advance_run(run.run_id)  # ambiguous -> opens GOAL_CLARIFICATION
+    assert blocked.disposition is AdvanceDisposition.BLOCKED
+
+    with backend.unit_of_work() as uow:
+        gate = next(iter(uow.gates.open_for_run(run.run_id)))
+        gate_id = gate.gate_id
+        uow.rollback()
+    service.respond_gate(  # consume clarified -> same-state bump + goal_clarification
+        gate_id,
+        request_id="rq1",
+        actor="approver",
+        role="orchestrator",  # matches the role the coordinator opened the Gate with
+        payload={"outcome": "clarified", "clarification": "focus on pricing"},
+    )
+
+    progressed = await service.advance_run(run.run_id)  # effective goal clear -> PLANNING
+    assert progressed.disposition is AdvanceDisposition.PROGRESSED
+    assert progressed.to_state is RunState.PLANNING  # no longer loops BLOCKED

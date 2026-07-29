@@ -27,7 +27,6 @@ def _open(backend, clock, *, gate_type=GateType.PLAN_APPROVAL, artifact_hash=Non
             actor="approver",
             role="approver",
             scope="plan",
-            allowed_response_schema="{}",
             ttl_seconds=ttl,
             artifact_hash=artifact_hash,
         )
@@ -67,11 +66,17 @@ def test_respond_rejects_unauthorized_actor_and_role(backend, fake_clock) -> Non
                 request_id="rq1",
                 actor="eve",
                 role="approver",
-                payload={},
+                payload={"outcome": "approved"},
                 allowed_actors=("approver",),
             )
         with pytest.raises(GateUnauthorizedError):
-            svc.respond(gate, request_id="rq1", actor="approver", role="intruder", payload={})
+            svc.respond(
+                gate,
+                request_id="rq1",
+                actor="approver",
+                role="intruder",
+                payload={"outcome": "approved"},
+            )
         uow.rollback()
 
 
@@ -87,7 +92,7 @@ def test_respond_rejects_artifact_mismatch(backend, fake_clock) -> None:
                 request_id="rq1",
                 actor="approver",
                 role="approver",
-                payload={},
+                payload={"outcome": "approved"},
                 expected_artifact_hash="sha256:different",
             )
         uow.rollback()
@@ -104,15 +109,31 @@ def test_duplicate_response_is_rejected_and_consume_is_single_use(backend, fake_
     # transaction — the second must be rejected as a duplicate (9.5).
     with backend.unit_of_work() as uow:
         svc = GateService(uow, fake_clock, backend.idgen)
-        svc.respond(gate, request_id="rq1", actor="approver", role="approver", payload={})
+        svc.respond(
+            gate,
+            request_id="rq1",
+            actor="approver",
+            role="approver",
+            payload={"outcome": "approved"},
+        )
         with pytest.raises(DuplicateGateResponseError):
-            svc.respond(gate, request_id="rq1", actor="approver", role="approver", payload={})
+            svc.respond(
+                gate,
+                request_id="rq1",
+                actor="approver",
+                role="approver",
+                payload={"outcome": "approved"},
+            )
         uow.rollback()
     # Consume once succeeds; a second consume is rejected (single-use, 9.5).
     with backend.unit_of_work() as uow:
         svc = GateService(uow, fake_clock, backend.idgen)
         responded = svc.respond(
-            gate, request_id="rq2", actor="approver", role="approver", payload={}
+            gate,
+            request_id="rq2",
+            actor="approver",
+            role="approver",
+            payload={"outcome": "approved"},
         )
         consumed = svc.consume(responded)
         uow.commit()
@@ -155,7 +176,7 @@ def test_respond_rejects_expired_gate(backend, fake_clock) -> None:
                 request_id="rq1",
                 actor="approver",
                 role="approver",
-                payload={},
+                payload={"outcome": "approved"},
             )
         uow.rollback()
 
@@ -176,7 +197,11 @@ async def test_tick_blocks_on_open_gate_and_resumes_after_consume(backend, fake_
     with backend.unit_of_work() as uow:
         svc = GateService(uow, fake_clock, backend.idgen)
         responded = svc.respond(
-            gate, request_id="rq1", actor="approver", role="approver", payload={}
+            gate,
+            request_id="rq1",
+            actor="approver",
+            role="approver",
+            payload={"outcome": "approved"},
         )
         svc.consume(responded)
         uow.commit()
