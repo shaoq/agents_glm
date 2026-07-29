@@ -1,54 +1,141 @@
 ## ADDED Requirements
 
-### Requirement: Gate 消费按 outcome 转 Run state
+### Requirement: 类型化且确定性的 Gate response
 
-系统 SHALL 在 Gate 消费时调用 `apply_gate_continuation`，按 gate response 的 outcome 与 `GateContinuation.next_state_by_outcome` 将 Run 转到对应状态，覆盖全部 4 类 Gate。转换仍走 CAS（`run.save expected_version`），且保留 stale 版本保护（continuation 绑定的 `state_version`/`plan_version` 漂移时不转）。
+系统 SHALL 根据 Gate 类型和显式 `outcome` 使用类型化 response contract 校验 payload。未知或缺失 outcome、字段类型错误、未声明字段以及 outcome 所需业务字段缺失或为空时，系统 MUST 在响应和消费前拒绝请求，Gate 保持 OPEN，Run 不变。
 
-#### Scenario: GOAL_CLARIFICATION 澄清后重新 normalize
+#### Scenario: GOAL_CLARIFICATION clarified 要求澄清内容
 
-- **WHEN** `GOAL_CLARIFICATION` gate 的 response outcome = `clarified`
-- **THEN** Run 转到 `NORMALIZING`（按 continuation），重新 normalize
+- **WHEN** GOAL_CLARIFICATION response 的 outcome 为 `clarified`
+- **THEN** payload MUST 包含非空字符串 `clarification`
 
-#### Scenario: GOAL_CLARIFICATION 取消
+#### Scenario: PLAN_APPROVAL rejected 要求反馈
 
-- **WHEN** `GOAL_CLARIFICATION` gate 的 response outcome = `cancelled`
-- **THEN** Run 转到 `CANCELED`（终态）
+- **WHEN** PLAN_APPROVAL response 的 outcome 为 `rejected`
+- **THEN** payload MUST 包含非空字符串 `feedback`
 
-#### Scenario: PLAN_APPROVAL 批准进入研究
+#### Scenario: CONFLICT_RESOLUTION resolved 要求解决方案
 
-- **WHEN** `PLAN_APPROVAL` gate 的 response outcome = `approved`
-- **THEN** Run 转到 `RESEARCHING`
+- **WHEN** CONFLICT_RESOLUTION response 的 outcome 为 `resolved`
+- **THEN** payload MUST 包含非空字符串 `resolution`
 
-#### Scenario: stale continuation 不推进
+#### Scenario: CONFLICT_RESOLUTION escalated 要求原因
 
-- **WHEN** Gate continuation 绑定的 `state_version`/`plan_version` 与当前 Run 不符（如期间发生过 replan）
-- **THEN** `apply_gate_continuation` 不转 state（既有保护，不回归）
+- **WHEN** CONFLICT_RESOLUTION response 的 outcome 为 `escalated`
+- **THEN** payload MUST 包含非空字符串 `reason`
 
-### Requirement: outcome 确定性提取
+#### Scenario: FINAL_REVIEW changes 要求修改意见
 
-Gate response payload SHALL 包含显式 `outcome` 字段（取值限定为该 gate 类型在 `GATE_CONTINUATION_NEXT` 中的 keys）。`GateService.respond` MUST 校验 `outcome` 合法——非法值拒绝消费（`GateResponseError`），不依赖 LLM 或 schema 推断。
+- **WHEN** FINAL_REVIEW response 的 outcome 为 `changes`
+- **THEN** payload MUST 包含非空字符串 `feedback`
 
-#### Scenario: 合法 outcome 被接受
+#### Scenario: 非法 payload 不产生副作用
 
-- **WHEN** response payload 的 `outcome` 在该 gate 类型的合法集合内
-- **THEN** gate 进入 RESPONDED，后续消费按该 outcome 转 state
+- **WHEN** response payload 缺少合法 outcome 或不满足对应类型化 contract
+- **THEN** 系统抛出 `GateResponseError`，Gate 保持 OPEN，Run、Request ID dedup 和事件流均不改变
 
-#### Scenario: 非法 outcome 被拒绝
+### Requirement: 全部 Gate outcome 通过 continuation 解析
 
-- **WHEN** response payload 的 `outcome` 不在合法集合内（或缺失）
-- **THEN** `GateService.respond` 抛 `GateResponseError`，gate 不被响应/消费
+系统 SHALL 只使用 Gate 中持久化的 `GateContinuation.next_state_by_outcome` 解析目标状态，调用者不得直接指定目标。系统 MUST 区分状态改变、same-state、stale、未知 outcome 和非法状态转换。
 
-### Requirement: Gate response 业务内容流回 phase
+#### Scenario: GOAL_CLARIFICATION clarified
 
-`GOAL_CLARIFICATION` 的澄清业务内容 SHALL 流回 phase——消费时并入 Run 的目标信息（澄清后的目标），使重新 normalize 时 normalizer 能读到，避免基于原 `raw_goal` 再次判歧义而循环 BLOCKED。
+- **WHEN** 合法 GOAL_CLARIFICATION response 的 outcome 为 `clarified`
+- **THEN** Run 的 continuation 目标为 NORMALIZING，并形成新的 state version
+
+#### Scenario: GOAL_CLARIFICATION cancelled
+
+- **WHEN** 合法 GOAL_CLARIFICATION response 的 outcome 为 `cancelled`
+- **THEN** Run 进入 CANCELED，termination reason 为 CANCELED
+
+#### Scenario: PLAN_APPROVAL approved
+
+- **WHEN** 合法 PLAN_APPROVAL response 的 outcome 为 `approved`
+- **THEN** Run 进入 RESEARCHING
+
+#### Scenario: PLAN_APPROVAL rejected
+
+- **WHEN** 合法 PLAN_APPROVAL response 的 outcome 为 `rejected`
+- **THEN** Run 回到或保持 PLANNING，并形成新的 state version
+
+#### Scenario: CONFLICT_RESOLUTION resolved
+
+- **WHEN** 合法 CONFLICT_RESOLUTION response 的 outcome 为 `resolved`
+- **THEN** Run 进入 RESEARCHING
+
+#### Scenario: CONFLICT_RESOLUTION escalated
+
+- **WHEN** 合法 CONFLICT_RESOLUTION response 的 outcome 为 `escalated`
+- **THEN** Run 进入 FAILED，termination reason 为 FAILED
+
+#### Scenario: FINAL_REVIEW approved
+
+- **WHEN** 合法 FINAL_REVIEW response 的 outcome 为 `approved`
+- **THEN** Run 进入 FINALIZING
+
+#### Scenario: FINAL_REVIEW changes
+
+- **WHEN** 合法 FINAL_REVIEW response 的 outcome 为 `changes`
+- **THEN** Run 回到或保持 REVIEWING，并形成新的 state version
+
+### Requirement: 无法安全应用的 continuation 失效
+
+当 Gate continuation 缺失、绑定版本 stale、不包含已验证 outcome 或目标状态转换非法时，系统 MUST 拒绝把响应应用到 Run，并使该 Gate 失效，避免不可应用的 Gate 继续阻塞执行。
+
+#### Scenario: stale Gate response
+
+- **WHEN** Gate continuation 的 bound state version 或 bound plan version 与当前 Run 不符
+- **THEN** Gate 进入 CANCELED 并记录 `GATE_INVALIDATED`，Run 及其目标信息不变，响应返回稳定的 stale error
+
+#### Scenario: continuation 缺失或损坏
+
+- **WHEN** Gate 没有 continuation、continuation 不包含已验证 outcome 或映射到非法状态转换
+- **THEN** Gate 进入 CANCELED 并记录带具体 reason 的 `GATE_INVALIDATED`，Run 不变，响应返回稳定的 continuation error
+
+### Requirement: Gate 消费与 Run resume 原子提交
+
+合法 Gate response SHALL 在同一个 Unit of Work 中完成 Gate RESPONDED、Gate CONSUMED、Run amendment/转换、一次基于原 state version 的 CAS 保存以及 durable events。任一步失败 MUST 回滚全部副作用。
+
+#### Scenario: same-state resume 递增版本
+
+- **WHEN** 合法 continuation 的目标状态等于 Run 当前状态
+- **THEN** Run 状态保持不变，但 `state_version` 恰好递增一次并更新 `updated_at`
+
+#### Scenario: CAS 冲突
+
+- **WHEN** 最终 Run 保存发生 expected version 冲突
+- **THEN** Gate 状态、Run、dedup claim 和事件均保持事务开始前状态
+
+#### Scenario: Run 只保存一次
+
+- **WHEN** 合法响应同时包含 Run amendment 和状态转换
+- **THEN** 系统从同一个原始 Run 构造最终 Run，并仅执行一次以原 state version 为 expected version 的 CAS 保存
+
+### Requirement: 目标澄清作为有效目标上下文
+
+GOAL_CLARIFICATION 的 clarification SHALL 作为原始目标的补充上下文持久化到 Run。Goal phase MUST 使用由原始目标和 clarification 组成的 effective goal；原始 `raw_goal` MUST 保持不变。
 
 #### Scenario: 澄清后重新 normalize 成功
 
-- **WHEN** 用户对 `GOAL_CLARIFICATION` 提交 `{outcome: clarified, clarification: "..."}` 且被消费
-- **AND** Run 转 `NORMALIZING` 后重新 normalize
-- **THEN** normalizer 读到并入澄清后的目标，归一化成功 → PROGRESSED（不再循环 BLOCKED）
+- **WHEN** 用户提交合法 `{outcome: "clarified", clarification: "..."}` 并消费 Gate
+- **AND** Run 后续执行 NORMALIZING phase
+- **THEN** normalizer 接收到同时包含原始目标和用户 clarification 的 effective goal，能够基于新增信息继续归一化
 
-#### Scenario: 原始 raw_goal 保留
+#### Scenario: 原始目标保持可追溯
 
-- **WHEN** 澄清并入 Run 目标信息
-- **THEN** 原始 `raw_goal` 保留不变（审计可追溯，澄清作为叠加而非覆盖）
+- **WHEN** clarification 被写入 Run
+- **THEN** `raw_goal` 与创建 Run 时完全一致，clarification 存在独立可选字段中
+
+### Requirement: durable resume 和终态事件
+
+每次合法 Gate 消费 SHALL 在同一事务记录 `GATE_RESPONDED`、`GATE_CONSUMED` 和 `RUN_RESUMED`。状态改变时 MUST 记录 `RUN_STATE_TRANSITION`；进入终态时 MUST 记录 `RUN_TERMINATED` 和正式 TerminationReason。
+
+#### Scenario: 合法 Gate 消费事件
+
+- **WHEN** Gate response 被成功消费
+- **THEN** durable event 包含 gate ID、Gate 类型、outcome、原 state version 和新 state version
+
+#### Scenario: 消费后显式推进
+
+- **WHEN** Gate 已成功消费且 Run 已 resume
+- **THEN** `respond_gate` 返回而不自动 drive，后续 `advance_run`、`drive_run` 或 watch 创建新的执行 claim

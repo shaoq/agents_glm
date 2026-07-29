@@ -1,30 +1,33 @@
 ## Why
 
-深度代码分析（main `d7c8d22`）发现 Human Gate 的**消费链路不完整**——核心逻辑 `apply_gate_continuation`（按 gate outcome 转 Run state）**只在测试里被调用，生产代码完全不调**；且 gate response（用户提交的澄清/审批内容）**没有流回 phase**。导致 Gate 消费后 Run 推进不正确，典型表现是 `GOAL_CLARIFICATION` 消费后重新 normalize 仍判歧义、循环 BLOCKED。
-
-这是连续代码阅读发现的**第四处「标记完整、消费待接」**（前三处：StageExecution 复用[伪优化已排除]、`AWAITING_RETRY→READY`、observation 有界放弃；后两者已纳入 `complete-runtime-retry-and-stage-replay` change）。Gate 的写入侧（开 gate + 建 continuation + version 绑定 + 校验 + 单次消费）全部就绪，唯独「消费时 apply continuation 转 state」和「response 流回 phase」两环没接。
+Human Gate 当前只完成了“响应并标记消费”，没有把已持久化的 continuation 应用到 Run，也没有把目标澄清作为新的 phase 输入，因此合法响应可能无法推进 Run，或在同一 phase 中重复 BLOCKED。与此同时，响应 payload 仍是未执行的自由字典，无法保证 `clarified` 等 outcome 携带后续 phase 必需的业务内容。
 
 ## What Changes
 
-- **gap 1 修复（apply continuation）**：在 Gate 消费路径（`GateService.consume` 或 `service.respond_gate`）调用 `apply_gate_continuation(gate, run, outcome, now)`，按 gate response 的 outcome 转 Run state（走 `GATE_CONTINUATION_NEXT` 的映射，4 类 gate 都支持）。
-- **outcome 提取**：从 gate response payload 确定性地提取 outcome 字符串（如 `GOAL_CLARIFICATION` 的 `clarified`/`cancelled`）。payload 结构含显式 `outcome` 字段（+ 业务内容如澄清文本）。
-- **gap 2 修复（response 流回 phase）**：让 gate response 的业务内容（澄清/审批意见）流回 phase，使重新 execute 时 phase 能读到——避免 normalizer 直接耦合 gate。
-- **配套测试**：`GOAL_CLARIFICATION` 消费后 Run 正确转 state + 重新 normalize 用上澄清 → PROGRESSED（不循环）；4 类 gate 的 outcome→state 转换都正确。
+- **BREAKING**：Gate response payload 必须使用按 Gate 类型和 outcome 区分的类型化结构；所有响应都必须显式包含合法 `outcome`，需要反馈内容的 outcome 必须包含非空业务字段。
+- 在 `OrchestrationService.respond_gate` 的同一 Unit of Work 中完成响应校验、Gate RESPONDED/CONSUMED、continuation 解析、Run amendment、单次 CAS 保存及事件写入。
+- 对 continuation 的 `applied`、`same-state`、`missing`、`stale`、`unknown`、`invalid-transition` 结果做显式分类；合法 same-state resume 也递增 `state_version`，无法安全应用的 Gate 被失效且不修改 Run。
+- 为 `Run` 增加可选的目标澄清上下文，并提供 `effective_goal`；Goal phase 使用“原始目标 + 澄清上下文”重新 normalize，`raw_goal` 始终保留。
+- 对取消/升级到终态的 outcome 写入正式 `TerminationReason`；消费成功写入 durable `RUN_RESUMED`，状态改变、终止或 stale 失效时补充相应 Run/Gate 事件。
+- 补齐 4 类 Gate、8 个 outcome、stale/CAS/非法 payload、GOAL_CLARIFICATION 不循环以及公共 CLI/API 迁移测试。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `human-gate-consumption-flow`: Human Gate 消费的完整性——按 outcome apply continuation 转 Run state，并将 gate response 的业务内容流回后续 phase。
+- `human-gate-consumption-flow`: 定义类型化 Gate 响应、version-bound continuation 消费、原子 Run resume、目标澄清回流以及审计事件的完整契约。
 
 ### Modified Capabilities
 
-<!-- 现有 openspec/specs/ 下的 capability 均属 RAG/Memory 检索能力，本 change 不改变其 spec 级需求。 -->
+<!-- 当前 openspec/specs/ 中没有已归档的 Human Gate capability。本 capability 与
+     add-intelligent-research-orchestrator 中尚未归档的 human-gated-orchestration
+     保持语义一致，但不伪装成对不存在基线 spec 的 MODIFIED delta。 -->
 
 ## Impact
 
-- **代码**：`orchestration/gates.py`（`GateService.consume` apply continuation）/ `application/service.py`（`respond_gate`）/ `orchestration/coordination.py` 或 `domain/coordination.py`（outcome 提取）；gap 2 视方案涉及 `normalizer` 读澄清 或 `respond_gate` amend goal。
-- **既有纪律不变**：Gate 的 version-bound（continuation 绑 `state_version`/`plan_version`，stale 时不转，`apply_gate_continuation` 已实现 :349-352）、single-use（CONSUMED 后不可再 respond）、at-most-once（Request ID 去重）、expiry action 全部保留。
-- **outcome 提取确定性**：payload → outcome 必须确定性映射（显式 `outcome` 字段），不靠 LLM 猜。
-- **4 类 gate 都支持**：`GOAL_CLARIFICATION` / `PLAN_APPROVAL` / `CONFLICT_RESOLUTION` / `FINAL_REVIEW`。
-- **apply 仍走 CAS**（`run.save expected_version`），不绕过版本校验。
+- **领域模型**：`domain/execution.py` 增加目标澄清上下文和 `effective_goal`；`domain/coordination.py` 暴露可判别的 continuation resolution；增加类型化 Gate response 模型和 `GATE_INVALIDATED` effect。
+- **编排与应用层**：`orchestration/gates.py` 执行类型化 payload 校验；`orchestration/phases.py` 使用 `effective_goal`；`application/service.py` 原子编排 Gate 消费、Run CAS 和事件。
+- **公共接口**：CLI/Python API 的 Gate payload 合约发生破坏性变化；README、示例和所有调用方必须迁移。
+- **持久化**：Run 仍存于现有 JSON blob，无 SQLite schema migration；旧 Run 缺少新可选字段时可继续反序列化。
+- **既有纪律**：single-use、Request ID at-most-once、expiry 和后续新 Attempt/Lease 的执行模型保留；消费成功后仍由显式 `advance/drive/watch` 创建新执行 claim，不在 `respond_gate` 中自动 drive。
+- **范围说明**：本 change 补齐消费闭环，不声称修复既有 Human Gate 规格中所有授权模型遗留问题；actor/scope 的领域语义重构及 FINAL_REVIEW 的开 Gate 策略不在本 change 内。
