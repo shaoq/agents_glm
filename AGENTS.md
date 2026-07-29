@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **agents_glm** (10702 symbols, 17978 relationships, 137 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **agents_glm** (10895 symbols, 18352 relationships, 138 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -41,3 +41,35 @@ This project is indexed by GitNexus as **agents_glm** (10702 symbols, 17978 rela
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# GitNexus Worktree and Branch Review Rules
+
+## Canonical Index
+
+- Maintain exactly one canonical GitNexus index for this repository at the main repository root.
+- NEVER run `gitnexus analyze`, `npx gitnexus analyze`, or
+  `node .gitnexus/run.cjs analyze` from a linked, temporary, or agent-created
+  worktree.
+- Before analyzing, compare `git rev-parse --git-dir` with
+  `git rev-parse --git-common-dir`. If their resolved paths differ, the current
+  directory is a linked worktree and analysis MUST stop.
+- Use the same GitNexus runner/version that created the canonical index. Do not
+  mix a global or `npx` GitNexus version with a project-pinned runner against the
+  same index.
+
+## Branch and Worktree Review
+
+- Review branch content with the raw Git comparison
+  `git diff <base>...<head>` from the target worktree.
+- Use the canonical root index for `gitnexus_impact`, `gitnexus_context`, process
+  lookup, and test-coverage analysis of changed symbols.
+- Do not create a second index merely to review a branch. If an exact
+  branch-specific index is exceptionally required, obtain explicit user
+  approval, keep it isolated from the canonical index, address it by exact
+  absolute path, and unregister it immediately after use.
+- If duplicate repository names appear in the GitNexus registry, do not resolve
+  them by name. Stop, identify the canonical absolute path, and remove only the
+  unintended duplicate registration.
+- Changes that `gitnexus analyze` generates in `AGENTS.md`, `CLAUDE.md`, or index
+  metadata MUST NOT be included in a branch review diff unless those generated
+  files are explicitly part of the requested change.
