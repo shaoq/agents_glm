@@ -21,7 +21,8 @@
 
 **Non-Goals:**
 
-- 不改 Lease / Fencing / Checkpoint / Recovery 既有语义。
+- 不改变 Lease / Fencing / Checkpoint / Recovery 的对外语义；补齐 Attempt 接纳后遗漏的
+  Lease release，使“单 task 单 active Lease”既有不变量真正成立。
 - 不做「ACCEPTED 复用跳过 provider」（伪优化，触发场景不存在）。
 - 不引入真实定时器 / `asyncio.sleep`——backoff 计时基于 `clock` + `task.updated_at`，保持确定性可测。
 - 不做 phase 级降级（部分成功）——首期只做「有界 FAILED」，降级留 Open Question。
@@ -66,13 +67,41 @@ if len(pending_obs) >= threshold:    # threshold = max_attempts_per_task（既�
 
 **Rationale**：把「phase 反复 IDLE」从「空转到 max_advances」变成「累积超阈值即明确 FAILED」。observation（PREPARED）终于有了消费逻辑（计数 → 终止判断）。
 
+### 决策 3：Code Review Remediation——显式区分失败 IDLE 与 WAITING
+
+`PhaseOutcome` 增加“是否消耗 IDLE 预算”的显式标记，并传播到 `AdvanceReport`：
+
+- provider failure、缺少前置等可立即重试的 IDLE：消耗预算，`drive_run` 可继续 advance；
+- task 仍在 `AWAITING_RETRY` / in-flight 的 IDLE：标记 WAITING，不消耗预算，
+  `drive_run` 返回当前 IDLE 并让出控制，等待下一次外部 tick/watch；
+- 不引入 `asyncio.sleep` 或内部真实定时器，保持单次 advance 有界。
+
+### 决策 4：只统计当前 fingerprint 下连续、可计费的 IDLE
+
+`StageExecution` 持久化 `counts_toward_idle_budget`。Coordinator 对缺失
+`input_fingerprint` 的 IDLE 使用当前 `state_version + plan_version` 合成确定性 fingerprint。
+统计时从最新记录反向遍历，只接受：
+
+1. 与当前 fingerprint 相同；
+2. `status=PREPARED`；
+3. `counts_toward_idle_budget=true`。
+
+遇到历史 fingerprint、BLOCKED、stale、WAITING 或其他状态立即停止，从而实现“连续”语义。
+
+### 决策 5：Attempt 接纳与 Lease release 原子提交
+
+成功或失败 Attempt 被接纳时，若 task 最新 Lease 的 attempt/epoch 与当前 Attempt 匹配且仍 active，
+则在同一 UnitOfWork 内将其转为 RELEASED。重试重派前旧 Lease 已关闭，新 epoch 不会与旧 active
+Lease 重叠；late/stale Attempt 不得释放属于更新 Attempt 的 Lease。
+
 ## Risks / Trade-offs
 
 - **[backoff 重算与 RetryClassifier 一致性]** → 决策 1 复用同一公式（`base*2^(attempts-1)`），并加测试断言两者一致。
 - **[observation 累积阈值太低 → 误终止]** → 用既有 `max_attempts_per_task`（已含默认 3），语义一致（task 级重试上限 = phase 级放弃上限），且可通过 RunPolicy 收紧/放宽。
 - **[有界 FAILED vs 降级]** → 首期只 FAILED（最简、明确）；降级（部分成功继续）留 Open Question。
 - **[backoff 上限]** → 指数退避可能很大（attempt_count 高时）；加 cap（如 60s）避免过长等待。Open Question。
-- **[observation 计数含历史 PREPARED]** → `for_logical_stage` 返回该 logical 所有 stage（含很久前的）；应只计「当前 fingerprint 相关」或最近 N 条。Open Question。
+- **[observation 计数含历史 PREPARED]** → 已由决策 4 收敛为“当前 fingerprint 下最新连续、
+  可计费 IDLE”，历史、BLOCKED、stale、WAITING 均不计入。
 
 ## Migration Plan
 
@@ -84,6 +113,5 @@ if len(pending_obs) >= threshold:    # threshold = max_attempts_per_task（既�
 ## Open Questions
 
 - **backoff cap**：指数退避是否加上限（如 60s）？建议加，避免高 attempt_count 时等待过久。
-- **observation 计数范围**：`for_logical_stage` 含历史记录，应限定「当前 plan_version / 最近 N 次」？需在实施时定。
 - **有界放弃后是否降级**：首期 FAILED；未来可改为「披露降级 + 部分继续」（类似 multi-source 的 OPTIONAL lane 降级）。
 - **AWAITING_RETRY 的 failure_code 传递**：重算 backoff 不需 failure_code（已判过 retryable），但 task.failure_code 是否在 READY 后保留用于诊断？建议保留。

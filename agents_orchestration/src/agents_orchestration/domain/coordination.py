@@ -83,6 +83,7 @@ class AdvanceReport(BaseModel):
     state_version: int = Field(ge=1)
     stage_logical_key: str | None = None
     task_tick: TaskTickSummary | None = None
+    continue_immediately: bool = True
 
     @property
     def progressed(self) -> bool:
@@ -233,6 +234,7 @@ class StageExecution(BaseModel):
     output_entity_ids: tuple[str, ...] = ()
     attempt_count: int = Field(default=0, ge=0)
     failure_code: FailureCode | None = None
+    counts_toward_idle_budget: bool = False
     idempotency_key: str
     created_at: datetime
     updated_at: datetime

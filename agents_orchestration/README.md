@@ -40,10 +40,13 @@ CLI / Python API → OrchestrationService → RunCoordinator.advance
 - `TaskRuntimeTick` 仍是 Task attempt 执行单元，按当前 phase 过滤 eligible Worker role。
 - **task 重试真正生效**：retryable 失败的 task 进入 `AWAITING_RETRY` 后，下一次 Tick 在 backoff 到期时
   自动转回 `READY` 重新派发（指数退避 `base*2^(n-1)`，封顶 60s，确定性基于 clock），重试预算用尽
-  （`max_attempts_per_task`）才 `FAILED`——Run 不再卡死在 RESEARCHING。
-- **phase IDLE 有界放弃**：某 phase 连续返回 IDLE（同 `logical_stage` 的 observation 累积）超过
-  `max_attempts_per_task` 时，Run 有界终止为 `FAILED`（`ATTEMPTS_EXHAUSTED`，披露降级），而非让
-  `drive_run` 空转到 `max_advances`。
+  （`max_attempts_per_task`）才 `FAILED`。backoff 未到期属于 WAITING：不消耗 phase IDLE 预算，
+  `drive_run` 返回并让出控制，等待下一次外部 tick/watch；Attempt 接纳时同步释放匹配 Lease，
+  避免重试 epoch 重叠。
+- **phase IDLE 有界放弃**：只统计当前 fingerprint 下连续、真正消耗预算的 IDLE；历史 fingerprint、
+  BLOCKED、stale 与 WAITING observation 都会中断计数。缺失 fingerprint 时 Coordinator 会根据当前
+  Run/Plan 版本确定性补全。连续次数达到 `max_attempts_per_task` 时，Run 有界终止为 `FAILED`
+  （`ATTEMPTS_EXHAUSTED`，披露降级），而非让 `drive_run` 空转到 `max_advances`。
 
 ## 只读边界（首期强制）
 

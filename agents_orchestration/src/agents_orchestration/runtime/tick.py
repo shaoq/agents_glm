@@ -287,6 +287,7 @@ class RuntimeTick:
                 }
             )
         )
+        self._release_accepted_lease(uow, attempt, now)
         current = uow.tasks.get(task.task_id)
         uow.tasks.save(
             current.transition(TaskState.SUCCEEDED, now, accepted_attempt_id=attempt.attempt_id)
@@ -305,6 +306,7 @@ class RuntimeTick:
             max_attempts=run.policy.max_attempts_per_task,
         )
         uow.attempts.save(attempt.fail(code, now, acceptance=AttemptAcceptance.ACCEPTED))
+        self._release_accepted_lease(uow, attempt, now)
         current = uow.tasks.get(task.task_id)
         if decision.retry:
             uow.tasks.save(current.transition(TaskState.AWAITING_RETRY, now))
@@ -326,6 +328,17 @@ class RuntimeTick:
             [self._event(run, EffectType.TASK_STATE_TRANSITION, now, task=task, attempt=attempt)]
         )
         return "failed"
+
+    @staticmethod
+    def _release_accepted_lease(uow, attempt, now) -> None:
+        lease = uow.leases.get(attempt.task_id)
+        if (
+            lease is not None
+            and lease.attempt_id == attempt.attempt_id
+            and lease.epoch == attempt.lease_epoch
+            and lease.state.is_active
+        ):
+            uow.leases.save(lease.release(now), expected_epoch=lease.epoch)
 
     def _consume_usage(self, run, usage: Usage):
         from agents_orchestration.runtime.core import consume_budget_safe

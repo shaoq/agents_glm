@@ -94,6 +94,8 @@ class PhaseOutcome:
     proposal: object | None = None
     bump_revision: bool = False
     bump_replan: bool = False
+    counts_toward_idle_budget: bool = True
+    continue_immediately: bool = True
 
 
 class PhaseHandler(Protocol):
@@ -240,7 +242,12 @@ class RunCoordinator:
         stale = classify_phase_result(captured, current_versions) is PhaseResultClassification.STALE
         if stale:  # task 4.6: stale result becomes an observation, no advance
             return self._accept_observation(
-                current, phase, outcome, now, reason=f"{phase.value}:stale-observation"
+                current,
+                phase,
+                outcome,
+                now,
+                reason=f"{phase.value}:stale-observation",
+                counts_toward_idle_budget=False,
             )
         if outcome.disposition is AdvanceDisposition.BLOCKED:
             return self._accept_blocked(current, phase, outcome, now)
@@ -251,6 +258,7 @@ class RunCoordinator:
                 outcome,
                 now,
                 reason=outcome.reason or f"{phase.value}:idle",
+                counts_toward_idle_budget=outcome.counts_toward_idle_budget,
             )
         # PROGRESSED: handler.accept does phase-specific persistence.
         with self.backend.unit_of_work() as uow:
@@ -286,6 +294,7 @@ class RunCoordinator:
             state_version=new_run.state_version,
             stage_logical_key=outcome.stage_logical_key or None,
             task_tick=outcome.task_tick,
+            continue_immediately=outcome.continue_immediately,
         )
 
     def _accept_blocked(self, run, phase, outcome, now):
@@ -307,24 +316,51 @@ class RunCoordinator:
             state_version=run.state_version,
             stage_logical_key=outcome.stage_logical_key or None,
             task_tick=outcome.task_tick,
+            continue_immediately=False,
         )
 
-    def _accept_observation(self, run, phase, outcome, now, *, reason):
+    def _accept_observation(
+        self,
+        run,
+        phase,
+        outcome,
+        now,
+        *,
+        reason,
+        counts_toward_idle_budget,
+    ):
         exhausted = False
         with self.backend.unit_of_work() as uow:
-            if outcome.input_fingerprint is not None:
-                uow.stages.save(self._build_stage(run, phase, outcome, StageStatus.PREPARED, now))
-                # Bounded give-up: a phase that keeps returning IDLE accumulates
-                # PREPARED observations on the same logical_stage. Past the retry
-                # budget, terminate (ATTEMPTS_EXHAUSTED) instead of letting
-                # drive_run spin to max_advances.
-                logical = outcome.stage_logical_key or stage_logical_key(phase)
-                prepared = sum(
-                    1
-                    for s in uow.stages.for_logical_stage(run.run_id, logical)
-                    if s.status is StageStatus.PREPARED
+            fingerprint = outcome.input_fingerprint or InputFingerprint(
+                state_version=run.state_version,
+                plan_version=run.current_plan_version,
+            )
+            uow.stages.save(
+                self._build_stage(
+                    run,
+                    phase,
+                    outcome,
+                    StageStatus.PREPARED,
+                    now,
+                    fingerprint=fingerprint,
+                    counts_toward_idle_budget=counts_toward_idle_budget,
                 )
-                exhausted = prepared >= run.policy.max_attempts_per_task
+            )
+            # Count only the newest consecutive, budget-consuming IDLE
+            # observations for the current fingerprint. Historical plans,
+            # BLOCKED/stale results and retry WAITING records break the streak.
+            logical = outcome.stage_logical_key or stage_logical_key(phase)
+            fingerprint_hex = fingerprint.hexdigest()
+            consecutive = 0
+            for stage in reversed(uow.stages.for_logical_stage(run.run_id, logical)):
+                if (
+                    stage.status is not StageStatus.PREPARED
+                    or stage.fingerprint.hexdigest() != fingerprint_hex
+                    or not stage.counts_toward_idle_budget
+                ):
+                    break
+                consecutive += 1
+            exhausted = consecutive >= run.policy.max_attempts_per_task
             uow.commit()
         if exhausted:
             return self._terminate(run, TerminationReason.ATTEMPTS_EXHAUSTED)
@@ -335,7 +371,9 @@ class RunCoordinator:
             disposition=AdvanceDisposition.IDLE,
             reason=reason,
             state_version=run.state_version,
+            stage_logical_key=outcome.stage_logical_key or None,
             task_tick=outcome.task_tick,
+            continue_immediately=outcome.continue_immediately,
         )
 
     def _open_gate(self, uow, run, outcome) -> None:
@@ -368,8 +406,18 @@ class RunCoordinator:
     def _persist_observation_stage(self, uow, run, phase, outcome, now) -> None:
         uow.stages.save(self._build_stage(run, phase, outcome, StageStatus.PREPARED, now))
 
-    def _build_stage(self, run, phase, outcome, status, now) -> StageExecution:
-        fp = outcome.input_fingerprint
+    def _build_stage(
+        self,
+        run,
+        phase,
+        outcome,
+        status,
+        now,
+        *,
+        fingerprint=None,
+        counts_toward_idle_budget=False,
+    ) -> StageExecution:
+        fp = fingerprint or outcome.input_fingerprint
         logical = outcome.stage_logical_key or stage_logical_key(phase)
         return StageExecution(
             stage_execution_id=self.backend.idgen.new_id("stage"),
@@ -381,6 +429,7 @@ class RunCoordinator:
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
             failure_code=outcome.failure_code,
+            counts_toward_idle_budget=counts_toward_idle_budget,
             idempotency_key=stage_idempotency_key(run.run_id, logical, fp.hexdigest()),
             created_at=now,
             updated_at=now,

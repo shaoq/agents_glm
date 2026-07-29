@@ -21,3 +21,12 @@
 ## 4. 文档
 
 - [x] 4.1 更新 `agents_orchestration/README.md`：说明 task 重试真正生效 + phase 有界放弃（替换「max_concurrency 名副其实」相关描述里对重试的隐含假设，如有）
+
+## 5. Code Review Remediation
+
+- [x] 5.1 回归测试：固定时钟下 backoff 未到期只返回 WAITING IDLE，不消耗 phase 预算，Run 不被提前终止
+- [x] 5.2 回归测试：Attempt 接纳后释放匹配 Lease；自动重试成功后不存在多个 active Lease，TTL 后 Recovery 不抛 fencing 错误
+- [x] 5.3 回归测试：缺失 `input_fingerprint` 的前置条件 IDLE 仍被记录并在阈值内有界终止
+- [x] 5.4 回归测试：历史 fingerprint、BLOCKED、stale、WAITING observation 不计入当前连续 IDLE 预算
+- [x] 5.5 实现 WAITING 让出、确定性 fingerprint、连续 observation 计数及 Lease 原子释放
+- [x] 5.6 更新 README，并运行全量 pytest、覆盖率、Ruff、`git diff --check` 与 GitNexus 变更检测

@@ -13,12 +13,19 @@
 
 - **WHEN** 一个 `AWAITING_RETRY` 的 task，`now < task.updated_at + backoff`
 - **THEN** task 保持 `AWAITING_RETRY`，本轮不被派发
+- **AND** phase 将该状态标记为 WAITING，`drive_run` 让出控制且不消耗 phase IDLE 预算
 
 #### Scenario: 可重试失败最终成功
 
 - **WHEN** 一个 task 因 retryable 失败（如 `UPSTREAM_ERROR`）进入 `AWAITING_RETRY`
 - **AND** backoff 到期后重新派发，新 Attempt 成功
 - **THEN** task 最终 `SUCCEEDED`，Run 继续推进（而非卡死）
+
+#### Scenario: Attempt 接纳后释放 Lease
+
+- **WHEN** 一个 Attempt 的成功或失败结果被接纳
+- **THEN** 系统在同一事务内释放与该 Attempt/epoch 匹配的 active Lease
+- **AND** 重试重派后每个 task 至多保留一个 active Lease，旧 epoch 到期不会阻塞 Recovery
 
 #### Scenario: 重试预算用尽仍 FAILED（不回归）
 
@@ -33,6 +40,18 @@
 
 - **WHEN** 某 phase 连续返回 IDLE，同 `logical_stage` 的 PREPARED observation 数量 `>= max_attempts_per_task`
 - **THEN** Run 终止为 `FAILED`（`ATTEMPTS_EXHAUSTED`），`drive_run` 不再空转
+
+#### Scenario: observation 只统计当前连续失败
+
+- **WHEN** 同一 `logical_stage` 存在历史 fingerprint、BLOCKED、stale 或 WAITING observation
+- **THEN** 这些记录不计入当前 fingerprint 的连续可计费 IDLE 次数
+- **AND** 任一非可计费 observation 会中断连续计数
+
+#### Scenario: 缺失 fingerprint 的 IDLE 仍有界
+
+- **WHEN** phase 因缺少前置数据返回 IDLE 且未提供 `input_fingerprint`
+- **THEN** Coordinator 基于当前 Run/Plan 版本生成确定性 fingerprint 并记录 observation
+- **AND** 连续次数达到阈值后 Run 仍以 `ATTEMPTS_EXHAUSTED` 终止
 
 #### Scenario: observation 未超阈值继续重试
 

@@ -277,6 +277,7 @@ class ResearchPhaseHandler:
                 if (report.dispatched or report.accepted)
                 else AdvanceDisposition.IDLE
             )
+            waiting = disposition is AdvanceDisposition.IDLE and report.blocked
             return PhaseOutcome(
                 disposition=disposition,
                 next_state=None,
@@ -284,6 +285,8 @@ class ResearchPhaseHandler:
                 stage_logical_key="research",
                 input_fingerprint=fp,
                 task_tick=summary,
+                counts_toward_idle_budget=not waiting,
+                continue_immediately=not waiting,
             )
         if all(t.state is TaskState.SUCCEEDED for t in tasks):  # 6.8: Join
             evidences = await self.evidence_provider(ctx.run.run_id)
@@ -365,6 +368,7 @@ async def _drive_phase_tasks(
             if (report.dispatched or report.accepted)
             else AdvanceDisposition.IDLE
         )
+        waiting = disposition is AdvanceDisposition.IDLE and report.blocked
         return tasks, PhaseOutcome(
             disposition=disposition,
             next_state=None,
@@ -372,6 +376,8 @@ async def _drive_phase_tasks(
             stage_logical_key=ctx.phase.value,
             input_fingerprint=fp,
             task_tick=summary,
+            counts_toward_idle_budget=not waiting,
+            continue_immediately=not waiting,
         )
     return tasks, None  # all terminal; caller produces the phase output
 

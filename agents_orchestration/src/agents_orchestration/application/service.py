@@ -224,6 +224,8 @@ class OrchestrationService:
         for _ in range(max_advances - 1):
             if last.disposition in (AdvanceDisposition.TERMINAL, AdvanceDisposition.BLOCKED):
                 break
+            if last.disposition is AdvanceDisposition.IDLE and not last.continue_immediately:
+                break
             last = await self.coordinator.advance(run_id)
         return last
 
