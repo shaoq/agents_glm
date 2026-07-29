@@ -56,8 +56,16 @@ cp .env.example .env  # 按需调整
 
 ## 默认离线测试
 
-默认测试套件**不调用真实网络**，全部使用确定性 Fake Adapter（架构测试保证 Fake 不 import
-httpx/openai/requests）。真实 Adapter 的 Smoke 测试需显式启用（`ORCH_LIVE_SMOKE=1`）。
+默认测试套件**不调用真实网络**，全部经 `tests/support` 的确定性 test double 驱动：真实
+`Memory/RAG/Web` adapter 注入确定性 `recall_fn`/`query_fn`/`fetch_fn`，阶段端口经
+`build_production_coordinator` 的显式注入缝替换为确定性 double（架构测试保证这些 double 不
+import httpx/openai/requests）。**生产代码不再包含任何 Fake 或模拟装配**。真实 Adapter 的 Smoke
+测试需显式启用（`ORCH_LIVE_SMOKE=1`）。
+
+> **开发模式注意**：生产代码只有一条装配——`OrchestrationService(backend)` 默认经
+> `build_production_coordinator_from_settings` 接真实 LLM，因此**本地驱动任意 Run 必须配置
+> `.env`（`ORCH_LLM_API_KEY` 等）**，否则会在首个 LLM 端口调用处失败。测试用
+> `tests.support.service_factory.build_test_service(backend)` 注入确定性 coordinator，无需网络。
 
 ```bash
 pytest                       # 全量（unit + integration + architecture + contract + e2e）

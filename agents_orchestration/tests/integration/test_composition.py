@@ -1,4 +1,4 @@
-"""Integration tests for the offline composition root (Ch.9)."""
+"""Integration tests for the deterministic test-double composition (Ch.9)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from agents_orchestration.domain.coordination import AdvanceDisposition
 from agents_orchestration.domain.enums import RunState
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
-from agents_orchestration.orchestration.composition import build_offline_coordinator
+from tests.support.deterministic import build_deterministic_coordinator
 
 NOW = datetime(2026, 7, 28, tzinfo=UTC)
 
 
 @pytest.mark.integration
-async def test_offline_coordinator_wires_all_phases(backend) -> None:
-    coord = build_offline_coordinator(backend)
+async def test_deterministic_coordinator_wires_all_phases(backend) -> None:
+    coord = build_deterministic_coordinator(backend)
     # Every phase has a handler wired.
     from agents_orchestration.domain.coordination import PhaseId
 
@@ -34,8 +34,8 @@ async def test_offline_coordinator_wires_all_phases(backend) -> None:
 
 
 @pytest.mark.integration
-async def test_offline_composition_drives_clear_goal_to_succeeded(backend) -> None:
-    coord = build_offline_coordinator(backend)
+async def test_deterministic_composition_drives_clear_goal_to_succeeded(backend) -> None:
+    coord = build_deterministic_coordinator(backend)
     run = Run(
         run_id=backend.idgen.new_id("run"),
         raw_goal="analyze X clearly",

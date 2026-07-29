@@ -10,6 +10,7 @@ from agents_orchestration.application.service import OrchestrationService
 from agents_orchestration.domain.coordination import AdvanceDisposition
 from agents_orchestration.domain.enums import RunState
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
+from tests.support.service_factory import build_test_service
 
 
 class _Clock:
@@ -24,7 +25,7 @@ class _Clock:
 @pytest.fixture
 def service(tmp_path) -> OrchestrationService:
     backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
-    return OrchestrationService(backend)
+    return build_test_service(backend)
 
 
 @pytest.mark.unit

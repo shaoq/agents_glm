@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from agents_orchestration.adapters.fake import (
-    FakeMemoryAdapter,
-    build_fake_registry,
-)
+from agents_orchestration.adapters.base import descriptor_for
+from agents_orchestration.adapters.memory import MemoryRecallAdapter
 from agents_orchestration.application.service import OrchestrationService
+from agents_orchestration.domain.enums import CapabilityKind
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
+from tests.support.deterministic import build_deterministic_coordinator
+from tests.support.service_factory import build_test_service
+from tests.support.test_registry import build_test_registry
 
 
 class FakeClock:
@@ -36,7 +38,7 @@ def fake_clock() -> FakeClock:
 @pytest.fixture
 def service(tmp_path: Path, fake_clock: FakeClock) -> OrchestrationService:
     backend = SqliteBackend(tmp_path / "runtime.sqlite", tmp_path / "artifacts", clock=fake_clock)
-    return OrchestrationService(backend)
+    return build_test_service(backend)
 
 
 @pytest.fixture
@@ -44,9 +46,15 @@ def empty_memory_service(tmp_path: Path, fake_clock: FakeClock) -> Orchestration
     """A service whose Memory adapter returns no evidence (degradation E2E)."""
 
     backend = SqliteBackend(tmp_path / "runtime.sqlite", tmp_path / "artifacts", clock=fake_clock)
-    registry = build_fake_registry()
+    registry = build_test_registry()
     # Replace the memory adapter with an empty-evidence one.
-    empty = FakeMemoryAdapter(evidence=())
-    memory_desc = empty.descriptor
-    registry.register(memory_desc, empty)
-    return OrchestrationService(backend, capability_registry=registry)
+    empty = MemoryRecallAdapter(
+        lambda query, scope: (),
+        descriptor=descriptor_for(CapabilityKind.MEMORY_RECALL, "memory"),
+    )
+    registry.register(empty.descriptor, empty)
+    return OrchestrationService(
+        backend,
+        capability_registry=registry,
+        coordinator=build_deterministic_coordinator(backend),
+    )

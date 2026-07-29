@@ -13,6 +13,7 @@ from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.orchestration.gates import GateService
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
+from tests.support.service_factory import build_test_service
 
 NOW = datetime(2026, 7, 28, tzinfo=UTC)
 
@@ -29,7 +30,7 @@ class _Clock:
 @pytest.fixture
 def service(tmp_path) -> OrchestrationService:
     backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
-    return OrchestrationService(backend)
+    return build_test_service(backend)
 
 
 # --- Task 8.8 / 8.9: pause persists the safe continuation point ------------

@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from agents_orchestration import cli as cli_mod
 from agents_orchestration.application.service import OrchestrationService
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
+from tests.support.service_factory import build_test_service
 
 
 class _Clock:
@@ -25,7 +26,7 @@ class _Clock:
 @pytest.fixture
 def service(tmp_path) -> OrchestrationService:
     backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
-    return OrchestrationService(backend)
+    return build_test_service(backend)
 
 
 @pytest.fixture
@@ -93,7 +94,7 @@ def test_capability_list_and_doctor(runner, patched) -> None:
     listed = runner.invoke(cli_mod.app, ["capability", "list"])
     doctor = runner.invoke(cli_mod.app, ["capability", "doctor"])
     assert listed.exit_code == 0 and doctor.exit_code == 0
-    assert len(json.loads(listed.stdout)) == 4
+    assert len(json.loads(listed.stdout)) == 3
     assert all("api_key" not in entry for entry in json.loads(doctor.stdout))
 
 

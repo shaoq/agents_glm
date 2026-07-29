@@ -26,7 +26,7 @@ class WriteCapabilityRejected(ValueError):
 
 @runtime_checkable
 class CapabilityAdapter(Protocol):
-    """Async capability Port implemented by Fake/Memory/RAG/Web/Model adapters."""
+    """Async capability Port implemented by Memory/RAG/Web/Model adapters."""
 
     descriptor: CapabilityDescriptor
 

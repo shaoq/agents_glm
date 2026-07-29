@@ -1,10 +1,9 @@
-"""End-to-end research run tests with Fake adapters (tasks 13.1 / 13.3 / 13.6 / 13.8)."""
+"""End-to-end research run tests with deterministic test doubles (13.1/13.3/13.6/13.8)."""
 
 from __future__ import annotations
 
 import pytest
 
-from agents_orchestration.application.service import OrchestrationService
 from agents_orchestration.domain.enums import (
     CapabilityKind,
     CompletionState,
@@ -29,6 +28,7 @@ from agents_orchestration.orchestration.report import (
     ReportSection,
 )
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
+from tests.support.service_factory import build_test_service
 
 
 def _contract(deliverable: str = "report.md") -> CompletionContract:
@@ -205,7 +205,7 @@ async def test_replan_preserves_accepted_and_adds_focused_task(service) -> None:
 @pytest.mark.e2e
 async def test_restart_resumes_in_fresh_process(tmp_path, fake_clock) -> None:
     backend_a = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=fake_clock)
-    service_a = OrchestrationService(backend_a)
+    service_a = build_test_service(backend_a)
     run = service_a.start_run("research Z", request_id="e2e-restart")
     run, _ = _accept_plan(service_a, run.run_id, (_research_spec("rs-1"),))
     # Simulate a mid-dispatch crash: task DISPATCHED with an already-expired lease.
@@ -243,7 +243,7 @@ async def test_restart_resumes_in_fresh_process(tmp_path, fake_clock) -> None:
     # Fresh process reopens the same store and resumes.
     fake_clock.advance(60)
     backend_b = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=fake_clock)
-    service_b = OrchestrationService(backend_b)
+    service_b = build_test_service(backend_b)
     await service_b.drive_run(run.run_id)
     with backend_b.unit_of_work() as uow:
         assert uow.tasks.get("rs-1").state is TaskState.SUCCEEDED
@@ -254,26 +254,22 @@ async def test_restart_resumes_in_fresh_process(tmp_path, fake_clock) -> None:
 
 
 @pytest.mark.e2e
-def test_fake_adapters_import_no_network_stack() -> None:
-    """The default (offline) suite must not import httpx/openai/requests anywhere
-    except the real adapters, which lazy-import them inside ``invoke`` (13.8)."""
+def test_test_doubles_import_no_network_stack() -> None:
+    """The default (offline) test doubles under ``tests/support`` must not import
+    httpx/openai/requests anywhere; real adapters lazy-import them inside
+    ``invoke`` (13.8)."""
 
     import ast
     from pathlib import Path
 
     providers = {"httpx", "openai", "requests", "aiohttp"}
-    fake_src = (
-        Path(__file__).resolve().parents[2]
-        / "src"
-        / "agents_orchestration"
-        / "adapters"
-        / "fake.py"
-    ).read_text(encoding="utf-8")
-    module = ast.parse(fake_src)
+    support_dir = Path(__file__).resolve().parents[1] / "support"
     roots = set()
-    for node in ast.walk(module):
-        if isinstance(node, ast.Import):
-            roots.update(a.name.split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            roots.add(node.module.split(".")[0])
+    for src_file in sorted(support_dir.glob("*.py")):
+        module = ast.parse(src_file.read_text(encoding="utf-8"))
+        for node in ast.walk(module):
+            if isinstance(node, ast.Import):
+                roots.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".")[0])
     assert not (roots & providers)

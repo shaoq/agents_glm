@@ -1,8 +1,7 @@
 """Shared adapter base, model profile and async bridge helpers (tasks 6.7 / 7.8).
 
 Real adapters (Memory/RAG/Web/Model) import siblings / provider SDKs lazily inside
-``invoke`` so importing this package never requires those dependencies; the
-deterministic Fake adapters (7.1) need none of them and back the default tests.
+``invoke`` so importing this package never requires those dependencies.
 """
 
 from __future__ import annotations
@@ -74,5 +73,5 @@ class AsyncCapabilityAdapter:
 
 def descriptor_for(kind: CapabilityKind, capability_id: str | None = None) -> CapabilityDescriptor:
     return CapabilityDescriptor(
-        capability_id=capability_id or f"fake::{kind.value}", kind=kind.value
+        capability_id=capability_id or f"cap::{kind.value}", kind=kind.value
     )

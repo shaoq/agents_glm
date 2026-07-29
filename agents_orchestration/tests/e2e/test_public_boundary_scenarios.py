@@ -22,7 +22,6 @@ from agents_orchestration.domain.enums import GateType, ReviewVerdict, RunState
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.policy import Budget, RunPolicy, SystemLimits
-from agents_orchestration.orchestration.composition import build_offline_coordinator
 from agents_orchestration.orchestration.phases import GoalPhaseHandler, ReviewPhaseHandler
 from agents_orchestration.orchestration.proposals import (
     GoalClarificationProposal,
@@ -31,6 +30,7 @@ from agents_orchestration.orchestration.proposals import (
 from agents_orchestration.orchestration.report import ReportContent, ReviewProposal
 from agents_orchestration.runtime.persistence.connection import SqliteBackend
 from agents_orchestration.runtime.tick import TickReport
+from tests.support.deterministic import build_deterministic_coordinator
 
 NOW = datetime(2026, 7, 28, tzinfo=UTC)
 
@@ -46,9 +46,8 @@ class _Clock:
 
 @pytest.fixture
 def service(tmp_path) -> OrchestrationService:
-    return OrchestrationService(
-        SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
-    )
+    backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts", clock=_Clock())
+    return OrchestrationService(backend, coordinator=build_deterministic_coordinator(backend))
 
 
 class _AmbiguousNormalizer:
@@ -67,9 +66,8 @@ class _AmbiguousNormalizer:
 
 @pytest.mark.e2e
 async def test_e2e_goal_clarification_gate(service: OrchestrationService) -> None:
-    coord = build_offline_coordinator(service.backend)
+    coord = service.coordinator
     coord.handlers[PhaseId.GOAL] = GoalPhaseHandler(_AmbiguousNormalizer(), service.backend.idgen)
-    service._coordinator = coord
 
     run = service.create_run("vague goal", request_id="r1")
     await service.advance_run(run.run_id)  # CREATED -> NORMALIZING
@@ -85,7 +83,7 @@ async def test_e2e_goal_clarification_gate(service: OrchestrationService) -> Non
 
 @pytest.mark.e2e
 async def test_e2e_research_gap_replan_gate(service: OrchestrationService) -> None:
-    coord = build_offline_coordinator(service.backend)
+    coord = service.coordinator
 
     class _GapReviewer:
         async def __call__(self, run_id: str, report):
@@ -95,13 +93,12 @@ async def test_e2e_research_gap_replan_gate(service: OrchestrationService) -> No
         return ReportContent(run_id=run_id, title="T", objective="O")
 
     coord.handlers[PhaseId.REVIEW] = ReviewPhaseHandler(
-        coord.handlers[PhaseId.RESEARCH].tick,  # share the FakeExecutor tick
+        coord.handlers[PhaseId.RESEARCH].tick,  # share the deterministic executor's tick
         _GapReviewer(),
         _report_provider,
         clock=service.backend.clock,
         idgen=service.backend.idgen,
     )
-    service._coordinator = coord
 
     run = await service.start_and_drive("clear goal", request_id="r2")
     # Drives through to REVIEW, where RESEARCH_GAP opens a conflict Gate and

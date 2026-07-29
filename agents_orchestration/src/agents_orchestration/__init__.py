@@ -18,8 +18,8 @@ Subpackages and their boundaries:
 - :mod:`agents_orchestration.workers` — worker definitions, registry and executor.
 - :mod:`agents_orchestration.capabilities` — capability descriptors, registry and
   router.
-- :mod:`agents_orchestration.adapters` — research capability adapters (Fake,
-  Memory, RAG, Web, Model). This is the ONLY package allowed to import
+- :mod:`agents_orchestration.adapters` — research capability adapters
+  (Memory, RAG, Web, Model). This is the ONLY package allowed to import
   ``agents_memory``, ``agents_rag`` or provider SDKs.
 - :mod:`agents_orchestration.application` — use-case OrchestrationService that
   composes the layers above; the CLI is a thin adapter over it.

@@ -22,7 +22,7 @@ from agents_orchestration.orchestration.branches import (
 def _req(bid: str, kind: CapabilityKind) -> CapabilityRequest:
     return CapabilityRequest(
         request_id=f"req-{bid}",
-        capability_id=f"fake::{kind.value}",
+        capability_id=f"test::{kind.value}",
         worker_id="w",
         run_id="r1",
         task_id="t1",

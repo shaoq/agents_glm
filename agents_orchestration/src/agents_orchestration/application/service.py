@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_orchestration.adapters.fake import build_fake_registry
 from agents_orchestration.adapters.health import capability_doctor
 from agents_orchestration.capabilities.registry import CapabilityRegistry
 from agents_orchestration.capabilities.router import CapabilityRouter
@@ -21,7 +20,6 @@ from agents_orchestration.domain.enums import RunState, TerminationReason, Worke
 from agents_orchestration.domain.execution import Attempt, Run, Task
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
-from agents_orchestration.orchestration.composition import build_offline_coordinator
 from agents_orchestration.runtime.ports import OrphanArtifactError, StaleVersionError
 from agents_orchestration.runtime.tick import RuntimeTick
 from agents_orchestration.runtime.watch import RuntimeWatch
@@ -54,7 +52,7 @@ class DefaultWorkerHandler:
     """Invoke the task's first registered capability and wrap it in a TaskResult.
 
     Real per-role prompt logic is layered on later; this keeps a default run
-    executable with Fake adapters and proves the wiring end to end.
+    executable end to end when a capability registry is supplied.
     """
 
     def __init__(self, registry: CapabilityRegistry, idgen) -> None:
@@ -107,19 +105,18 @@ class OrchestrationService:
         limits: SystemLimits | None = None,
         capability_registry: CapabilityRegistry | None = None,
         run_policy: RunPolicy | None = None,
-        production: bool = False,
+        coordinator=None,
     ) -> None:
         self.backend = backend
         self.limits = limits or SystemLimits()
-        self.capability_registry = capability_registry or build_fake_registry()
+        self.capability_registry = capability_registry or CapabilityRegistry()
         self.run_policy = run_policy or RunPolicy.from_limits(self.limits)
         self.workers = WorkerRegistry.default()
         self.router = CapabilityRouter(self.capability_registry, backend.idgen)
         handler = DefaultWorkerHandler(self.capability_registry, backend.idgen)
         self._handlers = {role: handler for role in WorkerRole}
         self._executor = WorkerExecutor(self.workers, self.router, self._handlers, self.run_policy)
-        self._production = production
-        self._coordinator = None
+        self._coordinator = coordinator
 
     # --- 11.1 / 11.2 run lifecycle -------------------------------------------
 
@@ -235,14 +232,11 @@ class OrchestrationService:
     @property
     def coordinator(self):
         if self._coordinator is None:
-            if self._production:
-                from agents_orchestration.orchestration.composition import (
-                    build_production_coordinator_from_settings,
-                )
+            from agents_orchestration.orchestration.composition import (
+                build_production_coordinator_from_settings,
+            )
 
-                self._coordinator = build_production_coordinator_from_settings(self.backend)
-            else:
-                self._coordinator = build_offline_coordinator(self.backend)
+            self._coordinator = build_production_coordinator_from_settings(self.backend)
         return self._coordinator
 
     def create_run(self, raw_goal: str, *, request_id: str) -> Run:

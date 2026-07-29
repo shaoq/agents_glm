@@ -238,7 +238,7 @@ class ResearchPhaseHandler:
     ``tick`` is the bounded :class:`RuntimeTick` (phase-role filtering in 6.2
     ensures it only dispatches EVIDENCE_RESEARCHER Tasks here).
     ``evidence_provider`` loads accepted research evidence for the Join; the
-    composition root (Ch.9) wires a real loader, tests inject a Fake.
+    composition root (Ch.9) wires a real loader, tests inject a deterministic double.
     """
 
     phase = PhaseId.RESEARCH
