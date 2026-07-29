@@ -16,6 +16,7 @@ A single Tick is bounded (one pass over currently-ready work). :class:`RuntimeWa
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -164,12 +165,20 @@ class RuntimeTick:
             )
             uow.commit()
 
-        # Phase 2: execute outside any transaction.
+        # Phase 2: execute outside any transaction — dispatches run concurrently
+        # up to ``run.policy.max_concurrency``. The Semaphore makes the existing
+        # max_concurrency field (already used for scheduling, ready_work) also
+        # govern execution, so multi-source / multi-task research fans out for
+        # real. Each Task already has its own Lease (claimed in Phase 1), and
+        # Phase 3 accepts outcomes as a batch, so concurrency is recovery-safe.
         run_snapshot = run
-        outcomes = []
-        for task, attempt in dispatches:
-            outcome = await self.executor.execute(task, attempt, run_snapshot)
-            outcomes.append((task, attempt, outcome))
+        sem = asyncio.Semaphore(run_snapshot.policy.max_concurrency)
+
+        async def _execute_one(task, attempt):
+            async with sem:
+                return task, attempt, await self.executor.execute(task, attempt, run_snapshot)
+
+        outcomes = await asyncio.gather(*(_execute_one(t, a) for t, a in dispatches))
 
         # Phase 3: accept transaction.
         return await self._accept(run_id, outcomes)

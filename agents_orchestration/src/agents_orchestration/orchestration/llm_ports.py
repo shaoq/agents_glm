@@ -12,6 +12,8 @@ components, not untrusted workers.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from agents_orchestration.adapters.llm_tools import pydantic_to_tool
@@ -53,11 +55,59 @@ _ROLE_MAP: dict[str, WorkerRole] = {
 }
 
 _CAPS_FOR_ROLE: dict[WorkerRole, tuple[CapabilityKind, ...]] = {
-    WorkerRole.EVIDENCE_RESEARCHER: (CapabilityKind.RAG_SEARCH,),
+    # EVIDENCE_RESEARCHER caps are derived from source_hints via map_source_hints
+    # (multi-source); kept empty here for completeness. Other phases are
+    # model-backed and need no capability.
+    WorkerRole.EVIDENCE_RESEARCHER: (),
     WorkerRole.ANALYST: (),
     WorkerRole.REPORT_WRITER: (),
     WorkerRole.REPORT_REVIEWER: (),
 }
+
+
+# --- Multi-source hint mapping (task 2.3 / 2.4) ---
+
+
+# Semantic source labels (what the LLM picks) → (CapabilityKind, default BranchRole).
+# The LLM never names a CapabilityKind directly; this deterministic map is the
+# single place labels become capabilities, behind three guard rails:
+# web filter here → PlanValidator (allowed_capabilities) → Router policy.
+_SOURCE_HINT_MAP: dict[str, tuple[CapabilityKind, BranchRole]] = {
+    "local_knowledge": (CapabilityKind.RAG_SEARCH, BranchRole.REQUIRED),
+    "personal_context": (CapabilityKind.MEMORY_RECALL, BranchRole.REQUIRED),
+    "live_web": (CapabilityKind.WEB_RESEARCH, BranchRole.OPTIONAL),
+}
+
+
+def map_source_hints(
+    hints: list[str],
+    *,
+    web_enabled: bool,
+) -> tuple[tuple[CapabilityKind, BranchRole], ...]:
+    """Deterministic mapping: semantic source labels → ``(CapabilityKind, BranchRole)``.
+
+    - ``live_web`` is dropped when ``web_enabled`` is False (config-level filter; the
+      lane would be rejected by the Router anyway — dropping avoids a doomed dispatch).
+    - Empty ``hints`` falls back to ``[local_knowledge]`` so a research task always
+      has at least one source.
+    - Unknown labels are ignored; duplicate capabilities are de-duplicated.
+    - May return an empty tuple (all hints filtered/unknown) — the caller records a
+      Degradation for the resulting no-capability task.
+    """
+
+    if not hints:
+        hints = ["local_knowledge"]
+    out: list[tuple[CapabilityKind, BranchRole]] = []
+    seen: set[CapabilityKind] = set()
+    for hint in hints:
+        if hint == "live_web" and not web_enabled:
+            continue
+        mapped = _SOURCE_HINT_MAP.get(hint)
+        if mapped is None or mapped[0] in seen:
+            continue
+        seen.add(mapped[0])
+        out.append(mapped)
+    return tuple(out)
 
 
 class PortError(RuntimeError):
@@ -176,6 +226,9 @@ class _TaskSpecOut(BaseModel):
     role: str
     description: str
     deliverable: str | None = None
+    source_hints: list[Literal["local_knowledge", "personal_context", "live_web"]] = Field(
+        default_factory=list
+    )
 
 
 class _PlanOutput(BaseModel):
@@ -184,12 +237,21 @@ class _PlanOutput(BaseModel):
 
 
 class LLMPlanner(_LLMPortBase):
+    def __init__(self, adapter: OpenAIModelAdapter, idgen, *, web_enabled: bool = False) -> None:
+        super().__init__(adapter, idgen)
+        self._web_enabled = web_enabled
+
     async def propose_plan(self, goal: GoalSpec, completion, run_id: str) -> PlanProposal:
         prompt = (
-            "You are a research planner. Produce a task list that delivers a research report. "
-            "Each task has: task_id (stable id), role (one of: evidence_researcher, analyst, "
-            "report_writer, report_reviewer), description, and optional deliverable. "
-            "Include exactly one report_writer whose deliverable is report.md. "
+            "You are a research planner. Break the research objective into a few independent "
+            "sub-questions — one evidence_researcher task per sub-question, each with a focused "
+            "description (used as the search query). Also include exactly one analyst, one "
+            "report_writer (deliverable report.md), and one report_reviewer. "
+            "For each evidence_researcher task, pick source_hints from: "
+            "local_knowledge (local knowledge base), personal_context (personalized memory), "
+            "live_web (real-time web, expensive). Choose the sources that fit that sub-question. "
+            "Each task has: task_id (stable id), role, description, optional "
+            "deliverable, source_hints. "
             f"Research objective: {goal.objective}. Scope: {', '.join(goal.scope) or '(none)'}."
         )
         out = await self._call_tool(
@@ -199,13 +261,18 @@ class LLMPlanner(_LLMPortBase):
         specs = []
         for t in out_typed.tasks:
             role = _ROLE_MAP.get(t.role, WorkerRole.EVIDENCE_RESEARCHER)
+            if role is WorkerRole.EVIDENCE_RESEARCHER:
+                caps_roles = map_source_hints(t.source_hints, web_enabled=self._web_enabled)
+                required_capabilities = tuple(cr[0] for cr in caps_roles)
+            else:
+                required_capabilities = _CAPS_FOR_ROLE.get(role, ())
             specs.append(
                 TaskSpec(
                     task_id=t.task_id,
                     worker_role=role,
                     description=t.description,
                     deliverable_path=t.deliverable,
-                    required_capabilities=_CAPS_FOR_ROLE.get(role, ()),
+                    required_capabilities=required_capabilities,
                     branch_role=BranchRole.REQUIRED
                     if role is WorkerRole.EVIDENCE_RESEARCHER
                     else None,

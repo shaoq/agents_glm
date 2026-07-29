@@ -174,8 +174,8 @@ Gate、Completion 评估、Finalizer）均有测试覆盖；架构测试强制�
 
 **首期有意延后（不阻塞，需独立 change）**：
 
-- 真实 Memory/RAG 适配器的 composition-root 接线（adapter 已就绪，接受注入的公开边界 callable）；
-- 模型型 Worker 的完整 prompt 逻辑（当前 `DefaultWorkerHandler` 走通管线，真实 prompt 待加）；
+- 真实 sibling service（`agents_memory` / `agents_rag`）的 adapter 契约适配与接线：RESEARCH 阶段的多源编排骨架（子问题切分 + LLM 语义源标签 + 多源 Branch 并发 + Phase 2 真并行 + sibling adapter 注入点 `recall_fn`/`query_fn`/`fetch_fn`）已就绪，确定性 fake double 下沉 `tests/support` 验证完整链路；真实 `RecallResult`/`Answer` 契约适配是后续 change；
+- 模型型 Worker 的完整 prompt 逻辑（`LLMPlanner`/`LLMAnalyst` 等已接 glm-5.2 function calling，prompt 工程持续打磨）；
 - live Smoke 测试默认跳过（`ORCH_LIVE_SMOKE=1` 显式启用）；
 - 多 Watch 进程 / 分布式 Worker / FastAPI / Web UI / 真实写副作用 / 完整评测平台。
 

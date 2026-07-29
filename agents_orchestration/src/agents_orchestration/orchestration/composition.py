@@ -11,7 +11,6 @@ port seam. A composition with a missing required port MUST fail loudly
 
 from __future__ import annotations
 
-from agents_orchestration.domain.enums import CapabilityKind
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.orchestration.coordinator import RunCoordinator
@@ -134,31 +133,6 @@ def build_production_coordinator(
 # --- LLM production composition (Ch.4 tasks 4.1/4.2) ---
 
 
-class _LLMResearchHandler:
-    """EVIDENCE_RESEARCHER WorkerExecutor handler backed by the LLM knowledge
-    source (R1). Produces untrusted MODEL-sourced Evidence directly via the
-    adapter, bypassing the Router (phase-level trusted component, not an
-    untrusted task worker)."""
-
-    def __init__(self, adapter, idgen) -> None:
-        from agents_orchestration.orchestration.llm_ports import LLMResearchProvider
-
-        self._provider = LLMResearchProvider(adapter, idgen)
-
-    async def handle(self, task, attempt, run, invoke):
-        from agents_orchestration.domain.worker import TaskResult
-
-        evidences = await self._provider(run.run_id, run.raw_goal)
-        return TaskResult(
-            attempt_id=attempt.attempt_id,
-            task_id=task.task_id,
-            run_id=run.run_id,
-            worker_role=task.worker_role,
-            evidence=evidences,
-            summary="llm-research",
-        )
-
-
 class _NoopHandler:
     """Placeholder handler for Analysis/Write/Review Tasks: the real logic runs
     in the phase port (LLMAnalyst/Writer/Reviewer); the Task just succeeds so
@@ -176,14 +150,19 @@ class _NoopHandler:
         )
 
 
-def build_production_coordinator_from_settings(backend, settings=None) -> RunCoordinator:
+def build_production_coordinator_from_settings(
+    backend, settings=None, *, capability_registry=None
+) -> RunCoordinator:
     """Production composition from Settings (Ch.4 tasks 4.1/4.2).
 
     Wires real LLM-backed ports (GoalNormalizer/Planner/Analyst/Writer/Reviewer)
-    via function calling, an LLM research handler (R1), and persisted-evidence
-    providers. Real Memory/RAG/Web adapters are not yet wired into production
-    (deferred to a sibling change); the Research phase uses the LLM as its
-    knowledge source in the meantime.
+    via function calling, a multi-source EVIDENCE_RESEARCHER handler, and
+    persisted-evidence providers. ``capability_registry`` is the sibling-adapter
+    injection seam: production does NOT wire real Memory/RAG/Web adapters yet
+    (deferred to a sibling change — per remove-offline-fake-assembly, production
+    code contains no Fake classes); tests inject fake doubles via this parameter.
+    With no registry, research Tasks find no capability and degrade honestly
+    (no fabricated evidence).
 
     TODO: AnalysisArtifact/ReportContent are not yet persisted across phases, so
     analysis_provider/report_provider re-invoke the LLM (MVP — accepts a double
@@ -218,15 +197,22 @@ def build_production_coordinator_from_settings(backend, settings=None) -> RunCoo
     policy = settings.build_run_policy()
 
     normalizer = LLMGoalNormalizer(adapter, idgen)
-    planner = LLMPlanner(adapter, idgen)
+    planner = LLMPlanner(adapter, idgen, web_enabled=policy.web_enabled)
     analyst = LLMAnalyst(adapter, idgen)
     writer = LLMReportWriter(adapter, idgen)
     reviewer = LLMReportReviewer(adapter, idgen)
 
-    registry = CapabilityRegistry()
+    # capability_registry is the sibling-adapter injection seam. Production does
+    # not register real Memory/RAG/Web adapters yet (deferred); tests inject fake
+    # doubles. An empty registry means research Tasks degrade to no-capability.
+    registry = capability_registry or CapabilityRegistry()
     workers = WorkerRegistry.default()
     router = CapabilityRouter(registry, idgen)
-    research_handler = _LLMResearchHandler(adapter, idgen)
+    from agents_orchestration.orchestration.multi_source_handler import (
+        MultiSourceResearchHandler,
+    )
+
+    research_handler = MultiSourceResearchHandler(registry, idgen)
     noop = _NoopHandler()
     handlers = {
         WorkerRole.EVIDENCE_RESEARCHER: research_handler,
@@ -269,7 +255,7 @@ def build_production_coordinator_from_settings(backend, settings=None) -> RunCoo
         analysis_provider=analysis_provider,
         report_provider=report_provider,
         deliverables_provider=deliverables_provider,
-        allowed_capabilities=frozenset(CapabilityKind),
+        allowed_capabilities=registry.allowed_kinds(),
         limits=limits,
     )
 

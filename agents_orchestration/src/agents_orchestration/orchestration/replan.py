@@ -74,6 +74,7 @@ class ReplanService:
                     required_capabilities=spec.required_capabilities,
                     branch_role=spec.branch_role,
                     deliverable_path=spec.deliverable_path,
+                    description=spec.description,
                     created_at=now,
                     updated_at=now,
                 )

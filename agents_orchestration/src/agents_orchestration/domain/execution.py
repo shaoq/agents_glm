@@ -109,6 +109,7 @@ class Task(BaseModel):
     required_capabilities: tuple[CapabilityKind, ...] = Field(default_factory=tuple)
     branch_role: BranchRole | None = None
     deliverable_path: str | None = None
+    description: str | None = None
     attempt_count: int = Field(default=0, ge=0)
     accepted_attempt_id: AttemptId | None = None
     failure_code: FailureCode | None = None
