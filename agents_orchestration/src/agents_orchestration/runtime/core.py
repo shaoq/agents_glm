@@ -102,6 +102,16 @@ class RetryDecision:
     reason: str
 
 
+def retry_backoff_seconds(attempt_count: int, *, base: float = 1.0, cap: float = 60.0) -> float:
+    """Exponential backoff ``base * 2^(attempt_count-1)``, capped at ``cap``.
+
+    Shared by :class:`RetryClassifier` (backoff on failure) and the Tick's
+    retry-readmit step (AWAITING_RETRY → READY), so the two never diverge.
+    """
+
+    return min(cap, base * (2 ** (attempt_count - 1)))
+
+
 class RetryClassifier:
     """Durable retry classification with bounded budget and backoff (task 4.4)."""
 
@@ -116,7 +126,7 @@ class RetryClassifier:
             return RetryDecision(False, 0.0, "attempts_exhausted")
         if not failure_code.retryable:
             return RetryDecision(False, 0.0, f"{failure_code.value}_not_retryable")
-        backoff = self.base_backoff * (2 ** (attempts_used - 1))
+        backoff = retry_backoff_seconds(attempts_used, base=self.base_backoff)
         return RetryDecision(True, backoff, "retry_with_backoff")
 
 
@@ -183,6 +193,7 @@ __all__ = [
     "CheckpointService",
     "RetryClassifier",
     "RetryDecision",
+    "retry_backoff_seconds",
     "Scheduler",
     "consume_budget_safe",
 ]

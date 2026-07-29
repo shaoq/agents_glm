@@ -310,10 +310,24 @@ class RunCoordinator:
         )
 
     def _accept_observation(self, run, phase, outcome, now, *, reason):
+        exhausted = False
         with self.backend.unit_of_work() as uow:
             if outcome.input_fingerprint is not None:
-                self._persist_observation_stage(uow, run, phase, outcome, now)
+                uow.stages.save(self._build_stage(run, phase, outcome, StageStatus.PREPARED, now))
+                # Bounded give-up: a phase that keeps returning IDLE accumulates
+                # PREPARED observations on the same logical_stage. Past the retry
+                # budget, terminate (ATTEMPTS_EXHAUSTED) instead of letting
+                # drive_run spin to max_advances.
+                logical = outcome.stage_logical_key or stage_logical_key(phase)
+                prepared = sum(
+                    1
+                    for s in uow.stages.for_logical_stage(run.run_id, logical)
+                    if s.status is StageStatus.PREPARED
+                )
+                exhausted = prepared >= run.policy.max_attempts_per_task
             uow.commit()
+        if exhausted:
+            return self._terminate(run, TerminationReason.ATTEMPTS_EXHAUSTED)
         return AdvanceReport(
             run_id=run.run_id,
             from_state=run.state,

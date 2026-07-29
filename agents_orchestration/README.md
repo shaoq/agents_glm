@@ -38,6 +38,12 @@ CLI / Python API → OrchestrationService → RunCoordinator.advance
 - Gate 携带 version-bound continuation，consume 时确定性恢复下一 phase（caller 无法任意指定 target）；
 - `--create-only` 只持久化 CREATED Run；`runtime tick RUN_ID` 为单次 advance；`runtime watch` 循环 advance；
 - `TaskRuntimeTick` 仍是 Task attempt 执行单元，按当前 phase 过滤 eligible Worker role。
+- **task 重试真正生效**：retryable 失败的 task 进入 `AWAITING_RETRY` 后，下一次 Tick 在 backoff 到期时
+  自动转回 `READY` 重新派发（指数退避 `base*2^(n-1)`，封顶 60s，确定性基于 clock），重试预算用尽
+  （`max_attempts_per_task`）才 `FAILED`——Run 不再卡死在 RESEARCHING。
+- **phase IDLE 有界放弃**：某 phase 连续返回 IDLE（同 `logical_stage` 的 observation 累积）超过
+  `max_attempts_per_task` 时，Run 有界终止为 `FAILED`（`ATTEMPTS_EXHAUSTED`，披露降级），而非让
+  `drive_run` 空转到 `max_advances`。
 
 ## 只读边界（首期强制）
 

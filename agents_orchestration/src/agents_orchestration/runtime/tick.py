@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Protocol, runtime_checkable
 
 from agents_orchestration.domain.coordination import eligible_worker_roles
@@ -43,6 +44,7 @@ from agents_orchestration.runtime.core import (
     CheckpointService,
     RetryClassifier,
     Scheduler,
+    retry_backoff_seconds,
 )
 from agents_orchestration.runtime.lease import LeaseManager
 from agents_orchestration.runtime.recovery import RecoveryManager
@@ -85,11 +87,13 @@ class RuntimeTick:
         executor: TaskExecutor,
         limits: SystemLimits,
         lease_ttl_seconds: float = 30.0,
+        base_backoff_seconds: float = 1.0,
     ) -> None:
         self.backend = backend
         self.executor = executor
         self.limits = limits
         self.lease_ttl_seconds = lease_ttl_seconds
+        self.base_backoff_seconds = base_backoff_seconds
 
     async def tick(self, run_id: str) -> TickReport:
         clock = self.backend.clock
@@ -120,6 +124,8 @@ class RuntimeTick:
                 # A version-bound Human Gate holds the Run; resume creates a new
                 # Attempt/Lease after the Gate is consumed (task 9.6).
                 return TickReport(run_id, blocked=True)
+
+            self._readmit_retry_ready(uow, run, now)
 
             scheduler = Scheduler(uow)
             ready = scheduler.ready_work(run, max_concurrency=run.policy.max_concurrency)
@@ -195,7 +201,9 @@ class RuntimeTick:
                 raise KeyError(run_id)
             expected_version = run.state_version
             validator = AttemptValidator(uow)
-            classifier = RetryClassifier(self.limits)
+            classifier = RetryClassifier(
+                self.limits, base_backoff_seconds=self.base_backoff_seconds
+            )
             checkpoints = CheckpointService(uow, clock, idgen)
 
             for task, attempt, outcome in outcomes:
@@ -342,6 +350,22 @@ class RuntimeTick:
         return TickReport(
             run.run_id, terminal=True, termination=reason, violations=tuple(violations)
         )
+
+    def _readmit_retry_ready(self, uow, run, now) -> None:
+        """Re-queue retryable tasks whose backoff has elapsed (AWAITING_RETRY → READY).
+
+        backoff is recomputed from ``attempt_count`` (same formula as
+        :class:`RetryClassifier`), starting at ``task.updated_at`` (the moment
+        the task entered AWAITING_RETRY). No real timer — deterministic on the
+        injected ``clock``.
+        """
+
+        for task in uow.tasks.by_run(run.run_id):
+            if task.state is not TaskState.AWAITING_RETRY:
+                continue
+            backoff = retry_backoff_seconds(task.attempt_count, base=self.base_backoff_seconds)
+            if now >= task.updated_at + timedelta(seconds=backoff):
+                uow.tasks.save(task.transition(TaskState.READY, now))
 
     def _has_in_flight(self, uow, run_id: str) -> bool:
         return any(
