@@ -104,16 +104,16 @@ research handler SHALL 按 `task.required_capabilities` 构造 `Branch`（角色
 - **WHEN** 并发执行中进程崩溃
 - **THEN** 未完成 task 仍处 `DISPATCHED`，`RecoveryManager` 过期 lease 并重排；accept / fencing / budget 语义与串行时一致
 
-### Requirement: fake 多源 adapter 接入
+### Requirement: 测试 double 验证多源编排（生产无 Fake）
 
-系统 SHALL 用确定性 fake double 提供 RAG / Memory / Web 预设 evidence，跑通"Planner 多源提议 → handler 多源 Branch → EvidenceJoiner Join → 跨子问题汇总"完整链路；production composition MUST NOT 调用真实 `agents_rag` / `agents_memory` service。
+系统 SHALL 在 `tests/support/` 提供确定性 fake 多源 double（RAG / Memory / Web），经 `build_production_coordinator` 显式端口注入，跑通"Planner 多源提议 → handler 多源 Branch → EvidenceJoiner Join → 跨子问题汇总"完整链路。生产代码 MUST NOT 含任何 Fake 类（遵守 `remove-offline-fake-assembly`）；production composition MUST NOT 调用真实 `agents_rag` / `agents_memory` service，但 SHALL 暴露 sibling adapter 注入点（`recall_fn`/`query_fn`/`fetch_fn`）供后续 change 接入。
 
-#### Scenario: fake 多源 evidence
+#### Scenario: fake double 产出多源 evidence
 
-- **WHEN** fake RAG / Memory / Web adapter 被调用
-- **THEN** 返回各自预设的 normalized `Evidence`（`source_kind` 分别为 `RAG` / `MEMORY` / `WEB`，web/model 的 `is_untrusted=True`）
+- **WHEN** 测试经 `build_production_coordinator` 注入 fake RAG / Memory / Web double 并被 handler 调用
+- **THEN** 返回各自预设的 normalized `Evidence`（`source_kind` 分别为 `RAG` / `MEMORY` / `WEB`，web 的 `is_untrusted=True`）
 
-#### Scenario: 不接真实 sibling service
+#### Scenario: 生产代码无 Fake、不接真实 sibling
 
 - **WHEN** production composition 装配 research handler
-- **THEN** 使用 fake adapter；不导入或调用 `agents_rag.QueryPipeline` / `agents_memory.MemoryService` 真实实现
+- **THEN** 不含任何 Fake 类、不导入或调用 `agents_rag.QueryPipeline` / `agents_memory.MemoryService` 真实实现；sibling adapter 经注入点接入（当前未接，待后续 change）

@@ -10,8 +10,8 @@
 - **LLM 建议语义源标签 + 确定性映射（B）**：Planner schema 增加受约束枚举 `source_hints`（`local_knowledge`/`personal_context`/`live_web`）；LLM 只描述"需要什么特性的知识"，不碰 `CapabilityKind` 枚举；确定性映射表把标签翻译成 `(CapabilityKind, BranchRole)`，经三层卡边界（映射过滤 / `PlanValidator` / `Router` policy）。
 - **research handler 改为多源 Branch**：从直连 LLM 的 `_LLMResearchHandler` 改为"按 `task.required_capabilities` 构造 Branch → `dispatch_branches` 并发 → `EvidenceJoiner` Join"，复用 `branches.py`；失败 lane 由 `JoinPolicy` 降级，task 仍 SUCCEEDED，多源容错封装在 handler 内（`ResearchPhaseHandler` 的 Join 逻辑不改）。
 - **Phase 2 并发补全**：`tick.py` 的 `for-await` 改为 `asyncio.gather + Semaphore(run.policy.max_concurrency)`，使 `max_concurrency` 名副其实。
-- **fake 多源 adapter 接入**：用确定性 fake double 提供 RAG/Memory/Web 预设证据，跑通完整编排链路；**不接真实 sibling service**（`RecallResult`/`Answer` 契约不对齐，deferred 到后续 change）。
-- **composition 装配 + 边界收紧**：注册 fake adapter、装配多源 research handler、把 `allowed_capabilities` 从全开（`frozenset(CapabilityKind)`）收紧到实际注册集，让 `PlanValidator` 真正起边界作用。
+- **多源编排骨架 + 测试 double（不接真实 sibling）**：生产代码建多源 research handler 与 composition 的 sibling adapter 注入点（`recall_fn`/`query_fn`/`fetch_fn`）；fake 多源 double 下沉 `tests/support/`，经 `build_production_coordinator` 显式端口注入验证编排（遵守 `remove-offline-fake-assembly` 的"生产无 Fake"纪律）。真实 sibling 契约适配（`RecallResult`/`Answer`）deferred 到后续 change。
+- **composition 装配 + 边界收紧**：装配多源 research handler、暴露 sibling adapter 注入点、把 `allowed_capabilities` 从全开（`frozenset(CapabilityKind)`）收紧到实际支持集，让 `PlanValidator` 真正起边界作用。
 
 ## Capabilities
 
@@ -25,7 +25,7 @@
 
 ## Impact
 
-- **代码**：`orchestration/llm_ports.py`（`LLMPlanner` schema + prompt + 确定性映射）、`orchestration/composition.py`（装配 + `allowed_capabilities` 收紧）、新增多源 research handler（复用 `branches.py`）、`runtime/tick.py`（Phase 2 并发）、`adapters/fake.py`（fake 多源 evidence）；可能微调 `branches.py` 的 `invoke` 签名适配。
+- **代码**：`orchestration/llm_ports.py`（`LLMPlanner` schema + prompt + 确定性映射）、`orchestration/composition.py`（装配 + sibling 注入点 + `allowed_capabilities` 收紧）、新增多源 research handler（复用 `branches.py`）、`runtime/tick.py`（Phase 2 并发）、`tests/support/`（fake 多源 double）；可能微调 `branches.py` 的 `invoke` 签名适配。生产代码不引入任何 Fake 类（遵守 `remove-offline-fake-assembly`）。
 - **不接真实 sibling service**：`agents_rag.QueryPipeline.ask` / `agents_memory.MemoryService.recall` 的契约适配（`RecallRequest`/`RecallResult`/`Answer`）是后续独立 change。
 - **既有纪律不变**：只读边界、不可信证据标记（web/model 的 `is_untrusted=True`）、降级披露（`Degradation`）。
 - **依赖现有 policy**：`RunPolicy.web_enabled`（默认关）+ `web_allowed_domains` 域名白名单；`SystemLimits.max_concurrency` 默认 4。

@@ -4,9 +4,9 @@
 
 `LLMPlanner` 给所有 research task 硬编码 `required_capabilities=(RAG_SEARCH,)`（`llm_ports.py:55`），无"数据源"概念。`MemoryRecallAdapter`/`RagAdapter`/`WebResearchAdapter` 已实现却未接入 production composition；`branches.py` 的 `dispatch_branches`/`EvidenceJoiner`/`JoinPolicy` 已实现且有测试，但只在 tests 里跑。`tick.py:170` Phase 2 是 `for ... await` 串行执行，`max_concurrency` 字段贯穿 `SystemLimits→RunPolicy→Scheduler` 选批却在 execute 处失效。
 
-本 change 是 `add-orchestration-llm-ports` proposal 明确 defer 的"独立 change"。目标：把多源检索（fake 接入）+ 并行执行接入 RESEARCH，让研究证据来自多源检索而非 LLM 凭记忆。
+本 change 是 `add-orchestration-llm-ports` proposal 明确 defer 的"独立 change"。目标：在生产代码建多源编排骨架（子问题切分 + 多源 Branch + 并行执行 + sibling 注入点），用 `tests/support/` 的 fake double 验证编排正确，让真实多源检索在后续 sibling 接入 change 后即可启用。
 
-约束：adapter 工厂（`recall_fn_from_memory_service`/`query_fn_from_rag_pipeline`）与真实 sibling service 契约不对齐（`recall(RecallRequest)→RecallResult`、`ask(query)→Answer`），故本 change 用 fake double，真实接线 deferred。
+约束：adapter 工厂（`recall_fn_from_memory_service`/`query_fn_from_rag_pipeline`）与真实 sibling service 契约不对齐（`recall(RecallRequest)→RecallResult`、`ask(query)→Answer`），故本 change 用 `tests/support/` 的 fake double 验证编排，真实接线 deferred。遵守 `remove-offline-fake-assembly`：生产代码无 Fake 类，double 经 `build_production_coordinator` 注入。
 
 ## Goals / Non-Goals
 
@@ -16,7 +16,7 @@
 - LLM 建议**语义源标签** + 确定性映射守边界（B）。
 - research handler 改为**多源 Branch**（复用 `branches.py` 的 `dispatch_branches`/`EvidenceJoiner`）。
 - Phase 2 **真并发**（`asyncio.gather + Semaphore(max_concurrency)`）。
-- fake 多源 adapter 跑通完整编排链路。
+- 生产代码建多源骨架 + sibling 注入点；`tests/support/` fake double 验证完整编排链路。
 
 **Non-Goals:**
 
@@ -25,6 +25,7 @@
 - 不实现 web 的 query→url 真实转换（fake 阶段简化）。
 - 不引入子问题间依赖（首期子问题独立并行）。
 - 不做完整 Agent 评测平台 / 多 Watch 进程。
+- 生产代码不引入任何 Fake 类（遵守 `remove-offline-fake-assembly` 的「生产无 Fake」纪律，double 全部下沉 `tests/`）。
 
 ## Decisions
 
@@ -76,11 +77,11 @@ research handler 从直连 LLM 的 `_LLMResearchHandler` 改为：按 `task.requ
 - Budget 在 Phase 3 统一消费。
 - Recovery 语义不变（崩溃后 task 仍 DISPATCHED，`RecoveryManager` 重排）。
 
-### 决策 5：fake adapter 接入（不接真实 sibling）
+### 决策 5：测试 double 下沉 + 生产 sibling 注入点（不接真实 sibling）
 
-边界适配用确定性 fake double，提供 RAG/Memory/Web 预设 evidence。
+生产代码建多源 research handler，并在 `build_production_coordinator` 暴露 sibling adapter 注入点（`recall_fn`/`query_fn`/`fetch_fn`）。fake 多源 double 下沉 `tests/support/`，经 `build_production_coordinator` 显式端口注入，验证"Planner 多源提议 → handler 多源 Branch → EvidenceJoiner Join → 跨子问题汇总"完整链路。生产代码不含任何 Fake 类。
 
-**Rationale**：真实 sibling 契约不对齐（`RecallResult`/`Answer`），适配是独立工作；先用 fake 跑通"Planner 多源提议 → handler 多源 Branch → EvidenceJoiner Join → 跨子问题汇总"完整链路，验证 M2+B 设计正确。真实 Memory/RAG/Web 接线是后续 change。
+**Rationale**：遵守 `remove-offline-fake-assembly`（生产与测试替身分离）；真实 sibling 契约不对齐，适配是独立工作；先用测试 double 验证 M2+B 编排正确，生产骨架就绪待 sibling 接入。真实 Memory/RAG/Web 接线是后续 change。
 
 ## Risks / Trade-offs
 
@@ -92,7 +93,7 @@ research handler 从直连 LLM 的 `_LLMResearchHandler` 改为：按 `task.requ
 
 ## Migration Plan
 
-本地开发、无远端，无在线迁移。`composition.py` 切换装配（fake adapter + 多源 research handler + 收紧 `allowed_capabilities`）。旧的 `_LLMResearchHandler` 可保留对照或移除。灰度路径：先单源 fake 跑通，再加多源 + 并发。
+本地开发、无远端，无在线迁移。`composition.py` 装配多源 research handler + 暴露 sibling 注入点 + 收紧 `allowed_capabilities`；移除 `_LLMResearchHandler`。测试经 `build_production_coordinator` 注入 `tests/support/` 的 fake double。
 
 ## Open Questions
 
