@@ -64,3 +64,4 @@ logs/
 .claude/
 .codex/
 .worktrees/
+.superpowers/
