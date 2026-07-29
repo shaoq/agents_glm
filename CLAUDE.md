@@ -25,7 +25,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **agents_glm** (10702 symbols, 17978 relationships, 137 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **agents_glm** (10895 symbols, 18352 relationships, 138 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -65,3 +65,15 @@ This project is indexed by GitNexus as **agents_glm** (10702 symbols, 17978 rela
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## GitNexus 索引策略（worktree / 分支审查）
+
+主仓库只保留**一个 canonical GitNexus index**，不分散到各 worktree：
+
+- **禁止在临时 worktree 中运行 `npx gitnexus analyze`**——索引只在主仓库维护，避免多份索引漂移、口径不一。
+- **所有 GitNexus MCP 工具（`gitnexus_impact` / `gitnexus_context` / `gitnexus_detect_changes` / `gitnexus_query` 等）一律基于主仓库 canonical index**；worktree 内不另建索引。
+- **提取分支差异用 `git diff main...HEAD`**（在 worktree 内执行），不通过索引层面比较 worktree。
+- **对变更符号在 canonical index 上执行 `gitnexus_impact` / `gitnexus_context`**——符号名跨工作树一致，主仓库索引即可覆盖 worktree 中的同名符号，无需在 worktree 重建索引。
+- **代码 Review 时直接在 worktree 内审查 `git diff main...HEAD`**，并配合在主仓库 canonical index 上对变更符号跑 impact / context，二者结合判断改动影响面。
+
+> 例外：仅当主仓库 canonical index 明显落后（如 main 有大量新提交且 GitNexus 工具持续报 stale）时，才在**主仓库**（非 worktree）运行 `npx gitnexus analyze` 刷新一次。
