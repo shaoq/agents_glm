@@ -104,3 +104,28 @@ def test_replan_preserves_accepted_and_supersedes_invalidated(backend) -> None:
     assert t1.state is TaskState.SUCCEEDED and t1.plan_version == 2
     assert t2.state is TaskState.SUPERSEDED
     assert t3.state is TaskState.PENDING and t3.plan_version == 2
+
+
+@pytest.mark.integration
+def test_replan_rejects_non_research_add(backend) -> None:
+    """A Replan cannot add a non-research Task (remove-noop-phase-tasks 1.4)."""
+
+    run = _seed_researching(backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="evidence_gap",
+        add_task_specs=(
+            TaskSpec(task_id="t3", worker_role=WorkerRole.REPORT_WRITER, description="write"),
+        ),
+    )
+    with backend.unit_of_work() as uow:
+        run = uow.runs.get(run.run_id)
+        with pytest.raises(ValueError, match="non-research"):
+            ReplanService(
+                uow,
+                PlanValidator(SystemLimits()),
+                PlanAcceptor(uow, backend.clock, backend.idgen),
+                backend.clock,
+                backend.idgen,
+            ).replan(run, proposal)
+        uow.commit()

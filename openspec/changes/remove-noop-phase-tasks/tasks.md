@@ -1,11 +1,11 @@
 ## 1. Research-only Plan contract
 
-- [ ] 1.1 Rewrite `LLMPlanner.propose_plan` for research-only Task emission and constrain `_TaskSpecOut.role` to `Literal["evidence_researcher"]`
-- [ ] 1.2 Remove analyst/report_writer/report_reviewer Planner role mappings and the unknown-role fallback; invalid model roles must fail structured output validation rather than become research Tasks
-- [ ] 1.3 Extend `PlanValidator` to reject every non-`EVIDENCE_RESEARCHER` TaskSpec before materialization, with unit tests covering direct/custom Planner proposals
-- [ ] 1.4 Apply the same role invariant to Replan additions and preserved Tasks; test that a Replan cannot add or carry analyst/report_writer/report_reviewer Tasks into its new version
-- [ ] 1.5 Define/document `PlanGraph` and PLAN_APPROVAL as the dynamic research dispatch plan while identifying ANALYZE→WRITE→REVIEW→FINALIZE as the fixed downstream lifecycle
-- [ ] 1.6 Clarify final-deliverable validation and diagnostics so `report.md` is attributed to the fixed Writing phase rather than claimed to be produced by a research Task
+- [x] 1.1 Rewrite `LLMPlanner.propose_plan` for research-only Task emission and constrain `_TaskSpecOut.role` to `Literal["evidence_researcher"]`
+- [x] 1.2 Remove analyst/report_writer/report_reviewer Planner role mappings and the unknown-role fallback; invalid model roles must fail structured output validation rather than become research Tasks
+- [x] 1.3 Extend `PlanValidator` to reject every non-`EVIDENCE_RESEARCHER` TaskSpec before materialization, with unit tests covering direct/custom Planner proposals
+- [x] 1.4 Apply the same role invariant to Replan additions and preserved Tasks; test that a Replan cannot add or carry analyst/report_writer/report_reviewer Tasks into its new version
+- [x] 1.5 Define/document `PlanGraph` and PLAN_APPROVAL as the dynamic research dispatch plan while identifying ANALYZE→WRITE→REVIEW→FINALIZE as the fixed downstream lifecycle
+- [x] 1.6 Clarify final-deliverable validation and diagnostics so `report.md` is attributed to the fixed Writing phase rather than claimed to be produced by a research Task
 
 ## 2. Runtime scheduling hard guard
 

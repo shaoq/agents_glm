@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_orchestration.domain.enums import CapabilityKind, EffectType, RunState, TaskState
+from agents_orchestration.domain.enums import CapabilityKind, EffectType, RunState, TaskState, WorkerRole
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.goal import CompletionContract
@@ -57,6 +57,12 @@ class PlanValidator:
 
         ids = set(graph.task_ids)
         for spec in graph.task_specs:
+            if spec.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
+                diagnostics.append(
+                    f"task {spec.task_id} has non-research role "
+                    f"{spec.worker_role.value}; only evidence_researcher Tasks "
+                    "are dispatchable"
+                )
             for cap in spec.required_capabilities:
                 if cap not in allowed_capabilities:
                     diagnostics.append(
@@ -71,11 +77,9 @@ class PlanValidator:
                     f"dependency references unknown task {dep.predecessor}->{dep.successor}"
                 )
 
-        produced = {s.deliverable_path for s in graph.task_specs if s.deliverable_path}
-        produced |= set(proposal.deliverable_paths)
-        for path in completion.deliverable_paths:
-            if path not in produced:
-                diagnostics.append(f"required deliverable {path} is not produced by any task")
+        # Final deliverables (e.g. report.md) are owned by fixed lifecycle phases
+        # (Writing), not by dispatchable research Tasks, so Plan validation does
+        # not require a Task to produce them (remove-noop-phase-tasks 1.6).
 
         accepted = not diagnostics and graph.task_count > 0
         return PlanValidation(accepted, tuple(diagnostics), graph if accepted else None)

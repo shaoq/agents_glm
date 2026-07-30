@@ -127,11 +127,18 @@ class RuntimeTick:
 
             self._readmit_retry_ready(uow, run, now)
 
+            # Hard state guard (remove-noop-phase-tasks 2.1): only RESEARCHING
+            # schedules Tasks. Every other RunState produces zero dispatches even
+            # when ready or legacy Tasks exist; eligible_worker_roles is NOT used
+            # as an implicit "dispatch nothing" signal.
+            if run.state is not RunState.RESEARCHING:
+                return TickReport(run_id, blocked=self._has_in_flight(uow, run.run_id))
+
             scheduler = Scheduler(uow)
             ready = scheduler.ready_work(run, max_concurrency=run.policy.max_concurrency)
             eligible = eligible_worker_roles(run.state)
             if eligible is not None:
-                # task 6.2 / 6.4: only the current phase's Worker roles may dispatch
+                # RESEARCHING only: filter to the phase's eligible roles.
                 ready = [t for t in ready if t.worker_role in eligible]
             if not ready:
                 return TickReport(run_id, blocked=self._has_in_flight(uow, run.run_id))

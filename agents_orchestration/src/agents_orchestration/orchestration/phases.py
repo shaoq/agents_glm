@@ -351,54 +351,6 @@ class ReportReviewer(Protocol):
     async def __call__(self, run_id: str, report: ReportContent) -> ReviewProposal: ...
 
 
-async def _drive_phase_tasks(
-    ctx: PhaseContext, backend, tick, role: WorkerRole
-) -> tuple[list, PhaseOutcome | None]:
-    """Drive one bounded tick for ``role`` Tasks; return (tasks, outcome).
-
-    ``outcome`` is non-None while work is in flight / just progressed or when
-    no Tasks exist; it is None when every eligible Task is terminal so the
-    caller can produce the phase-specific output (tasks 7.2-7.6)."""
-
-    fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
-    with backend.unit_of_work() as uow:
-        tasks = [
-            t
-            for t in uow.tasks.by_run(ctx.run.run_id, plan_version=ctx.run.current_plan_version)
-            if t.worker_role is role
-        ]
-        uow.commit()
-    if not tasks:
-        return tasks, PhaseOutcome(
-            disposition=AdvanceDisposition.IDLE,
-            reason=f"no-{ctx.phase.value}-tasks",
-            stage_logical_key=ctx.phase.value,
-            input_fingerprint=fp,
-        )
-    if any(not t.is_terminal for t in tasks):
-        report = await tick.tick(ctx.run.run_id)
-        summary = TaskTickSummary(
-            dispatched=report.dispatched, accepted=report.accepted, terminal=report.terminal
-        )
-        disposition = (
-            AdvanceDisposition.PROGRESSED
-            if (report.dispatched or report.accepted)
-            else AdvanceDisposition.IDLE
-        )
-        waiting = disposition is AdvanceDisposition.IDLE and report.blocked
-        return tasks, PhaseOutcome(
-            disposition=disposition,
-            next_state=None,
-            reason=f"{ctx.phase.value}-tick:dispatched={report.dispatched}",
-            stage_logical_key=ctx.phase.value,
-            input_fingerprint=fp,
-            task_tick=summary,
-            counts_toward_idle_budget=not waiting,
-            continue_immediately=not waiting,
-        )
-    return tasks, None  # all terminal; caller produces the phase output
-
-
 def _simple_accept(outcome: PhaseOutcome, run: Run, uow, now) -> Run:
     moved = transition_or_stay(run, outcome.next_state, now)
     if moved.state is not run.state:
@@ -412,8 +364,7 @@ class AnalysisPhaseHandler:
 
     phase = PhaseId.ANALYZE
 
-    def __init__(self, tick, analyst: Analyst, evidence_provider, *, clock, idgen) -> None:
-        self.tick = tick
+    def __init__(self, analyst: Analyst, evidence_provider, *, clock, idgen) -> None:
         self.analyst = analyst
         self.evidence_provider = evidence_provider
         self.clock = clock
@@ -421,35 +372,24 @@ class AnalysisPhaseHandler:
 
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
-        tasks, driving = await _drive_phase_tasks(ctx, backend, self.tick, WorkerRole.ANALYST)
-        if driving is not None:
-            return driving
-        if all(t.state is TaskState.SUCCEEDED for t in tasks):
-            try:
-                evidence = await self.evidence_provider(ctx.run.run_id)
-                analysis = await self.analyst(ctx.run.run_id, evidence)
-            except Exception as exc:  # provider failure -> degrade (task 7.2)
-                return PhaseOutcome(
-                    disposition=AdvanceDisposition.IDLE,
-                    reason=f"analyze-provider-failed:{type(exc).__name__}",
-                    failure_code=FailureCode.UPSTREAM_ERROR,
-                    stage_logical_key="analyze",
-                    input_fingerprint=fp,
-                )
+        try:
+            evidence = await self.evidence_provider(ctx.run.run_id)
+            analysis = await self.analyst(ctx.run.run_id, evidence)
+        except Exception as exc:  # provider failure -> degrade
             return PhaseOutcome(
-                disposition=AdvanceDisposition.PROGRESSED,
-                next_state=RunState.WRITING,
-                reason="analyzed",
+                disposition=AdvanceDisposition.IDLE,
+                reason=f"analyze-provider-failed:{type(exc).__name__}",
+                failure_code=FailureCode.UPSTREAM_ERROR,
                 stage_logical_key="analyze",
                 input_fingerprint=fp,
-                proposal=analysis,
             )
         return PhaseOutcome(
-            disposition=AdvanceDisposition.IDLE,
-            reason="analyze-task-failed",
-            failure_code=FailureCode.UNKNOWN,
+            disposition=AdvanceDisposition.PROGRESSED,
+            next_state=RunState.WRITING,
+            reason="analyzed",
             stage_logical_key="analyze",
             input_fingerprint=fp,
+            proposal=analysis,
         )
 
     accept = staticmethod(_simple_accept)
@@ -461,8 +401,7 @@ class WritingPhaseHandler:
 
     phase = PhaseId.WRITE
 
-    def __init__(self, tick, writer: ReportWriter, analysis_provider, *, clock, idgen) -> None:
-        self.tick = tick
+    def __init__(self, writer: ReportWriter, analysis_provider, *, clock, idgen) -> None:
         self.writer = writer
         self.analysis_provider = analysis_provider
         self.clock = clock
@@ -470,35 +409,24 @@ class WritingPhaseHandler:
 
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
-        tasks, driving = await _drive_phase_tasks(ctx, backend, self.tick, WorkerRole.REPORT_WRITER)
-        if driving is not None:
-            return driving
-        if all(t.state is TaskState.SUCCEEDED for t in tasks):
-            try:
-                analysis = await self.analysis_provider(ctx.run.run_id)
-                report = await self.writer(ctx.run.run_id, analysis)
-            except Exception as exc:  # provider failure -> degrade (task 7.4)
-                return PhaseOutcome(
-                    disposition=AdvanceDisposition.IDLE,
-                    reason=f"write-provider-failed:{type(exc).__name__}",
-                    failure_code=FailureCode.UPSTREAM_ERROR,
-                    stage_logical_key="write",
-                    input_fingerprint=fp,
-                )
+        try:
+            analysis = await self.analysis_provider(ctx.run.run_id)
+            report = await self.writer(ctx.run.run_id, analysis)
+        except Exception as exc:  # provider failure -> degrade
             return PhaseOutcome(
-                disposition=AdvanceDisposition.PROGRESSED,
-                next_state=RunState.REVIEWING,
-                reason="draft-written",
+                disposition=AdvanceDisposition.IDLE,
+                reason=f"write-provider-failed:{type(exc).__name__}",
+                failure_code=FailureCode.UPSTREAM_ERROR,
                 stage_logical_key="write",
                 input_fingerprint=fp,
-                proposal=report,
             )
         return PhaseOutcome(
-            disposition=AdvanceDisposition.IDLE,
-            reason="write-task-failed",
-            failure_code=FailureCode.UNKNOWN,
+            disposition=AdvanceDisposition.PROGRESSED,
+            next_state=RunState.REVIEWING,
+            reason="draft-written",
             stage_logical_key="write",
             input_fingerprint=fp,
+            proposal=report,
         )
 
     accept = staticmethod(_simple_accept)
@@ -511,8 +439,7 @@ class ReviewPhaseHandler:
 
     phase = PhaseId.REVIEW
 
-    def __init__(self, tick, reviewer: ReportReviewer, report_provider, *, clock, idgen) -> None:
-        self.tick = tick
+    def __init__(self, reviewer: ReportReviewer, report_provider, *, clock, idgen) -> None:
         self.reviewer = reviewer
         self.report_provider = report_provider
         self.clock = clock
@@ -520,23 +447,10 @@ class ReviewPhaseHandler:
 
     async def execute(self, ctx: PhaseContext, backend) -> PhaseOutcome:
         fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
-        tasks, driving = await _drive_phase_tasks(
-            ctx, backend, self.tick, WorkerRole.REPORT_REVIEWER
-        )
-        if driving is not None:
-            return driving
-        if not all(t.state is TaskState.SUCCEEDED for t in tasks):
-            return PhaseOutcome(
-                disposition=AdvanceDisposition.IDLE,
-                reason="review-task-failed",
-                failure_code=FailureCode.UNKNOWN,
-                stage_logical_key="review",
-                input_fingerprint=fp,
-            )
         try:
             report = await self.report_provider(ctx.run.run_id)
             proposal = await self.reviewer(ctx.run.run_id, report)
-        except Exception as exc:  # provider failure -> degrade (task 7.6)
+        except Exception as exc:  # provider failure -> degrade
             return PhaseOutcome(
                 disposition=AdvanceDisposition.IDLE,
                 reason=f"review-provider-failed:{type(exc).__name__}",

@@ -98,21 +98,18 @@ def build_production_coordinator(
             idgen=backend.idgen,
         ),
         AnalysisPhaseHandler.phase: AnalysisPhaseHandler(
-            tick,
             analyst,
             evidence_set,
             clock=backend.clock,
             idgen=backend.idgen,
         ),
         WritingPhaseHandler.phase: WritingPhaseHandler(
-            tick,
             writer,
             analysis_provider,
             clock=backend.clock,
             idgen=backend.idgen,
         ),
         ReviewPhaseHandler.phase: ReviewPhaseHandler(
-            tick,
             reviewer,
             report_provider,
             clock=backend.clock,
@@ -131,23 +128,6 @@ def build_production_coordinator(
 
 
 # --- LLM production composition (Ch.4 tasks 4.1/4.2) ---
-
-
-class _NoopHandler:
-    """Placeholder handler for Analysis/Write/Review Tasks: the real logic runs
-    in the phase port (LLMAnalyst/Writer/Reviewer); the Task just succeeds so
-    the phase handler proceeds to call the port."""
-
-    async def handle(self, task, attempt, run, invoke):
-        from agents_orchestration.domain.worker import TaskResult
-
-        return TaskResult(
-            attempt_id=attempt.attempt_id,
-            task_id=task.task_id,
-            run_id=run.run_id,
-            worker_role=task.worker_role,
-            summary="noop-phase-task",
-        )
 
 
 def build_production_coordinator_from_settings(
@@ -213,12 +193,8 @@ def build_production_coordinator_from_settings(
     )
 
     research_handler = MultiSourceResearchHandler(registry, idgen)
-    noop = _NoopHandler()
     handlers = {
         WorkerRole.EVIDENCE_RESEARCHER: research_handler,
-        WorkerRole.ANALYST: noop,
-        WorkerRole.REPORT_WRITER: noop,
-        WorkerRole.REPORT_REVIEWER: noop,
     }
     executor = WorkerExecutor(workers, router, handlers, policy)
 

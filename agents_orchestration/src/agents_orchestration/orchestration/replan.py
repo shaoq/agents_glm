@@ -8,7 +8,7 @@ result; only invalidated Tasks are SUPERSEDED.
 
 from __future__ import annotations
 
-from agents_orchestration.domain.enums import EffectType, TaskState
+from agents_orchestration.domain.enums import EffectType, TaskState, WorkerRole
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.plan import Dependency, Plan, PlanGraph, TaskSpec
@@ -50,6 +50,10 @@ class ReplanService:
                 if not task.is_terminal:
                     self.uow.tasks.save(task.transition(TaskState.SUPERSEDED, now))
                 continue
+            # Replan does not carry non-research Tasks into the new version
+            # (remove-noop-phase-tasks 1.4); only evidence_researcher is dispatchable.
+            if task.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
+                continue
             # Promote preserved task to the new version; keep state and result.
             promoted = task.model_copy(
                 update={
@@ -62,6 +66,11 @@ class ReplanService:
             preserved.append(promoted)
 
         for spec in proposal.add_task_specs:
+            if spec.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
+                raise ValueError(
+                    f"Replan cannot add non-research task {spec.task_id} "
+                    f"(role {spec.worker_role.value})"
+                )
             self.uow.tasks.save(
                 Task(
                     task_id=spec.task_id,

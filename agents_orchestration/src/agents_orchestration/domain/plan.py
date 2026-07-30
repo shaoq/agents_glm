@@ -1,9 +1,18 @@
 """Dynamic PlanGraph and Task specifications (design Decision 3/8/10).
 
-The Planner emits a PlanGraph Proposal; the deterministic PlanValidator (task 5.5)
-checks DAG, registry, permissions, budget, depth, concurrency and deliverables
-before acceptance. This module holds the immutable structure plus the cheap
-graph invariants used by validation; full validation is wired up in Section 5.
+A ``PlanGraph`` is the **dynamic research dispatch plan**: it contains only
+``evidence_researcher`` TaskSpecs that the Task Runtime schedules while the Run
+is ``RESEARCHING``. The downstream phases ANALYZE → WRITE → REVIEW → FINALIZE
+are a **fixed lifecycle** driven by coordinator-owned phase ports
+(``LLMAnalyst`` / ``LLMReportWriter`` / ``LLMReportReviewer`` / ``Finalizer``)
+and are NOT represented as Tasks in this graph (remove-noop-phase-tasks).
+PLAN_APPROVAL therefore approves the dynamic research scope, while the control
+surface separately identifies the fixed later lifecycle.
+
+The Planner emits a PlanGraph Proposal; the deterministic PlanValidator checks
+DAG, cycle, registry, permissions, budget, depth, and the evidence_researcher-only
+role invariant before acceptance. This module holds the immutable structure plus
+the cheap graph invariants used by validation; full validation is in Section 5.
 """
 
 from __future__ import annotations

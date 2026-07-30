@@ -68,9 +68,10 @@ async def test_goal_normalizer_parses_and_builds_contract() -> None:
 async def test_planner_parses_task_specs() -> None:
     adapter = _FakeAdapter(
         tool_result=_tool_ok(
-            '{"tasks":[{"task_id":"t1","role":"evidence_researcher","description":"gather"},'
-            '{"task_id":"t2","role":"report_writer","description":"write","deliverable":"report.md"}],'
-            '"deliverable_paths":["report.md"]}',
+            '{"tasks":['
+            '{"task_id":"t1","role":"evidence_researcher","description":"gather A","source_hints":["local_knowledge"]},'
+            '{"task_id":"t2","role":"evidence_researcher","description":"gather B","source_hints":["live_web"]}'
+            '],"deliverable_paths":["report.md"]}',
             "propose_plan",
         )
     )
@@ -81,10 +82,31 @@ async def test_planner_parses_task_specs() -> None:
         None,
         "r1",
     )
-    roles = [s.worker_role for s in proposal.task_specs]
-    assert WorkerRole.EVIDENCE_RESEARCHER in roles
-    assert WorkerRole.REPORT_WRITER in roles
+    assert len(proposal.task_specs) == 2
+    assert all(s.worker_role is WorkerRole.EVIDENCE_RESEARCHER for s in proposal.task_specs)
     assert proposal.deliverable_paths == ("report.md",)
+
+
+@pytest.mark.unit
+async def test_planner_rejects_non_research_role() -> None:
+    """A non-evidence_researcher role fails structured-output validation rather
+    than falling back to a research Task (remove-noop-phase-tasks 1.2)."""
+
+    adapter = _FakeAdapter(
+        tool_result=_tool_ok(
+            '{"tasks":[{"task_id":"t1","role":"report_writer","description":"write"}]}',
+            "propose_plan",
+        )
+    )
+    from agents_orchestration.domain.goal import GoalSpec
+
+    with pytest.raises(PortError) as exc_info:
+        await LLMPlanner(adapter, _Id()).propose_plan(
+            GoalSpec(raw_input="g", objective="研究X", deliverables=("report.md",)),
+            None,
+            "r1",
+        )
+    assert exc_info.value.code is FailureCode.INVALID_RESPONSE
 
 
 @pytest.mark.unit

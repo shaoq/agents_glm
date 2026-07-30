@@ -140,22 +140,28 @@ def phase_for_state(state: RunState) -> PhaseId | None:
 
 PHASE_ROLES: dict[PhaseId, frozenset[WorkerRole]] = {
     PhaseId.RESEARCH: frozenset({WorkerRole.EVIDENCE_RESEARCHER}),
-    PhaseId.ANALYZE: frozenset({WorkerRole.ANALYST}),
-    PhaseId.WRITE: frozenset({WorkerRole.REPORT_WRITER}),
-    PhaseId.REVIEW: frozenset({WorkerRole.REPORT_REVIEWER}),
 }
+# ANALYZE / WRITE / REVIEW are coordinator-owned phase ports, not dispatched
+# phases (remove-noop-phase-tasks 2.2). They intentionally have no entry here so
+# eligible_worker_roles returns an explicit empty set for them rather than
+# implying "any role may dispatch".
 
 
 def eligible_worker_roles(state: RunState) -> frozenset[WorkerRole] | None:
-    """Worker roles permitted to dispatch for ``state``'s phase (task 6.2).
+    """Worker roles permitted to dispatch for ``state``'s phase.
 
-    Non-task phases (Goal / Plan / Finalize) and non-active states return None
-    — the coordinator drives those phases directly without dispatching Tasks,
-    so a tick in such a phase dispatches nothing rather than later-stage work.
+    Returns the phase's eligible roles for RESEARCHING; an explicit empty set for
+    active non-Task phases (ANALYZE/WRITE/REVIEW coordinator-owned ports, plus
+    Goal/Plan/Finalize); and ``None`` only for non-active states (paused /
+    gate-waiting / terminal). ``None`` is never an implicit "dispatch nothing":
+    active phases always get a concrete (possibly empty) set
+    (remove-noop-phase-tasks 2.2).
     """
 
     phase = phase_for_state(state)
-    return PHASE_ROLES.get(phase) if phase is not None else None
+    if phase is None:
+        return None
+    return PHASE_ROLES.get(phase, frozenset())
 
 
 # --- Task 2.5 / 2.6: logical stage key + input fingerprint + StageExecution -

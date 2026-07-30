@@ -47,22 +47,11 @@ from agents_orchestration.orchestration.report import (
 
 _DELIVERABLE = "report.md"
 
-_ROLE_MAP: dict[str, WorkerRole] = {
-    "evidence_researcher": WorkerRole.EVIDENCE_RESEARCHER,
-    "analyst": WorkerRole.ANALYST,
-    "report_writer": WorkerRole.REPORT_WRITER,
-    "report_reviewer": WorkerRole.REPORT_REVIEWER,
-}
-
-_CAPS_FOR_ROLE: dict[WorkerRole, tuple[CapabilityKind, ...]] = {
-    # EVIDENCE_RESEARCHER caps are derived from source_hints via map_source_hints
-    # (multi-source); kept empty here for completeness. Other phases are
-    # model-backed and need no capability.
-    WorkerRole.EVIDENCE_RESEARCHER: (),
-    WorkerRole.ANALYST: (),
-    WorkerRole.REPORT_WRITER: (),
-    WorkerRole.REPORT_REVIEWER: (),
-}
+# The Planner emits only evidence_researcher Tasks: ``_TaskSpecOut.role`` is a
+# Literal, so any other role fails structured-output validation instead of
+# falling back to a research Task. ANALYST / REPORT_WRITER / REPORT_REVIEWER are
+# coordinator-owned phase ports (LLMAnalyst / LLMReportWriter / LLMReportReviewer),
+# not dispatched Tasks, so they have no Planner role mapping here.
 
 
 # --- Multi-source hint mapping (task 2.3 / 2.4) ---
@@ -223,7 +212,7 @@ class LLMGoalNormalizer(_LLMPortBase):
 
 class _TaskSpecOut(BaseModel):
     task_id: str
-    role: str
+    role: Literal["evidence_researcher"]
     description: str
     deliverable: str | None = None
     source_hints: list[Literal["local_knowledge", "personal_context", "live_web"]] = Field(
@@ -244,14 +233,14 @@ class LLMPlanner(_LLMPortBase):
     async def propose_plan(self, goal: GoalSpec, completion, run_id: str) -> PlanProposal:
         prompt = (
             "You are a research planner. Break the research objective into a few independent "
-            "sub-questions — one evidence_researcher task per sub-question, each with a focused "
-            "description (used as the search query). Also include exactly one analyst, one "
-            "report_writer (deliverable report.md), and one report_reviewer. "
-            "For each evidence_researcher task, pick source_hints from: "
+            "sub-questions and emit one evidence_researcher task per sub-question, each with a "
+            "focused description (used as the search query). Every task role MUST be "
+            "evidence_researcher — do NOT emit analyst, report_writer, or report_reviewer tasks "
+            "(those phases run separately). For each task, pick source_hints from: "
             "local_knowledge (local knowledge base), personal_context (personalized memory), "
             "live_web (real-time web, expensive). Choose the sources that fit that sub-question. "
-            "Each task has: task_id (stable id), role, description, optional "
-            "deliverable, source_hints. "
+            "Each task has: task_id (stable id), role (evidence_researcher), description, "
+            "optional deliverable, source_hints. "
             f"Research objective: {goal.objective}. Scope: {', '.join(goal.scope) or '(none)'}."
         )
         out = await self._call_tool(
@@ -260,22 +249,18 @@ class LLMPlanner(_LLMPortBase):
         out_typed: _PlanOutput = out  # type: ignore[assignment]
         specs = []
         for t in out_typed.tasks:
-            role = _ROLE_MAP.get(t.role, WorkerRole.EVIDENCE_RESEARCHER)
-            if role is WorkerRole.EVIDENCE_RESEARCHER:
-                caps_roles = map_source_hints(t.source_hints, web_enabled=self._web_enabled)
-                required_capabilities = tuple(cr[0] for cr in caps_roles)
-            else:
-                required_capabilities = _CAPS_FOR_ROLE.get(role, ())
+            # _TaskSpecOut.role is Literal["evidence_researcher"]; any other role
+            # fails structured-output validation rather than becoming a research Task.
+            caps_roles = map_source_hints(t.source_hints, web_enabled=self._web_enabled)
+            required_capabilities = tuple(cr[0] for cr in caps_roles)
             specs.append(
                 TaskSpec(
                     task_id=t.task_id,
-                    worker_role=role,
+                    worker_role=WorkerRole.EVIDENCE_RESEARCHER,
                     description=t.description,
                     deliverable_path=t.deliverable,
                     required_capabilities=required_capabilities,
-                    branch_role=BranchRole.REQUIRED
-                    if role is WorkerRole.EVIDENCE_RESEARCHER
-                    else None,
+                    branch_role=BranchRole.REQUIRED,
                 )
             )
         return PlanProposal(
