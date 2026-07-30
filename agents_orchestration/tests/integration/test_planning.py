@@ -151,6 +151,49 @@ def test_validator_no_longer_requires_task_to_produce_final_deliverable(
     assert result.accepted
 
 
+@pytest.mark.integration
+def test_validator_rejects_uncovered_non_lifecycle_deliverable(backend, fake_clock) -> None:
+    """Only report.md is owned by the fixed Writing phase.
+
+    Any other CompletionContract deliverable must still be declared by the
+    Plan, otherwise the Run would do all upstream work before failing in
+    FINALIZING.
+    """
+
+    _run_planning(backend, fake_clock)
+    completion = CompletionContract(
+        criteria=(
+            CompletionCriterion(
+                kind=CriterionKind.DELIVERABLE,
+                description="appendix.csv",
+                deliverable_path="appendix.csv",
+            ),
+        ),
+        deliverable_paths=("appendix.csv",),
+    )
+    proposal = PlanProposal(
+        run_id="r1",
+        plan_id="p1",
+        task_specs=(_research_spec("t1"),),
+        deliverable_paths=(),
+    )
+
+    with backend.unit_of_work() as uow:
+        run = uow.runs.get("r1")
+        result = PlanValidator(SystemLimits()).validate(
+            proposal,
+            policy=run.policy,
+            allowed_capabilities=ALLOWED,
+            completion=completion,
+        )
+
+    assert not result.accepted
+    assert any(
+        "required deliverable appendix.csv is not produced" in diagnostic
+        for diagnostic in result.diagnostics
+    )
+
+
 # --- 5.6 / 5.7 PlanAcceptor -------------------------------------------------
 
 

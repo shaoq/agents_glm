@@ -19,6 +19,7 @@ The Task Runtime SHALL schedule Tasks only while the durable Run state is RESEAR
 - **WHEN** a new Plan Proposal or Replan Proposal contains an analyst, report_writer, or report_reviewer TaskSpec
 - **THEN** deterministic validation rejects the proposal
 - **AND** no executable Task for that role is materialized
+- **AND** Replan rejection occurs before any current Task, Plan, Run, dependency, or event is mutated
 
 #### Scenario: Plan approval presents dynamic and fixed work separately
 - **WHEN** PLAN_APPROVAL presents a research-only PlanGraph
@@ -30,6 +31,11 @@ The Task Runtime SHALL schedule Tasks only while the durable Run state is RESEAR
 - **WHEN** the Completion Contract requires report.md
 - **THEN** deterministic Plan validation recognizes the fixed Writing phase as the owner of that final deliverable
 - **AND** it does not require an evidence_researcher Task to claim report.md as its deliverable
+
+#### Scenario: Non-lifecycle deliverable is uncovered
+- **WHEN** the Completion Contract requires a path other than report.md
+- **AND** the Plan does not declare that path as produced
+- **THEN** deterministic Plan validation rejects the Plan before research work starts
 
 #### Scenario: Analysis, writing, and review execute via phase ports
 - **WHEN** the Run enters ANALYZING, WRITING, or REVIEWING

@@ -129,3 +129,48 @@ def test_replan_rejects_non_research_add(backend) -> None:
                 backend.idgen,
             ).replan(run, proposal)
         uow.commit()
+
+
+@pytest.mark.integration
+def test_rejected_replan_does_not_mutate_current_plan_tasks(backend) -> None:
+    """Role validation must run before any preserved Task is promoted.
+
+    The caller is allowed to catch the validation error and still commit other
+    UnitOfWork activity; a rejected proposal must therefore leave the current
+    Run, Plan, and Task versions unchanged.
+    """
+
+    run = _seed_researching(backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="invalid_writer_task",
+        add_task_specs=(
+            TaskSpec(task_id="t3", worker_role=WorkerRole.REPORT_WRITER, description="write"),
+        ),
+    )
+
+    with backend.unit_of_work() as uow:
+        current_run = uow.runs.get(run.run_id)
+        with pytest.raises(ValueError, match="non-research"):
+            ReplanService(
+                uow,
+                PlanValidator(SystemLimits()),
+                PlanAcceptor(uow, backend.clock, backend.idgen),
+                backend.clock,
+                backend.idgen,
+            ).replan(current_run, proposal)
+        uow.commit()
+
+    with backend.unit_of_work() as uow:
+        persisted_run = uow.runs.get(run.run_id)
+        current_plan = uow.plans.current(run.run_id)
+        t1 = uow.tasks.get("t1")
+        t2 = uow.tasks.get("t2")
+        t3 = uow.tasks.get("t3")
+        uow.commit()
+
+    assert persisted_run.current_plan_version == 1
+    assert current_plan.version == 1
+    assert t1.plan_version == 1
+    assert t2.plan_version == 1
+    assert t3 is None

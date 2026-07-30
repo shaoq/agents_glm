@@ -44,6 +44,13 @@ class ReplanService:
         invalidate = set(proposal.invalidate_task_ids)
         current_tasks = self.uow.tasks.by_run(run.run_id, current.version)
 
+        for spec in proposal.add_task_specs:
+            if spec.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
+                raise ValueError(
+                    f"Replan cannot add non-research task {spec.task_id} "
+                    f"(role {spec.worker_role.value})"
+                )
+
         preserved: list[Task] = []
         for task in current_tasks:
             if task.task_id in invalidate:
@@ -66,11 +73,6 @@ class ReplanService:
             preserved.append(promoted)
 
         for spec in proposal.add_task_specs:
-            if spec.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
-                raise ValueError(
-                    f"Replan cannot add non-research task {spec.task_id} "
-                    f"(role {spec.worker_role.value})"
-                )
             self.uow.tasks.save(
                 Task(
                     task_id=spec.task_id,

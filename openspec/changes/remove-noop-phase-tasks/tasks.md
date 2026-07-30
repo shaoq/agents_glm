@@ -55,3 +55,9 @@
 - [x] 7.4 Run the full offline `pytest` suite and confirm no real network calls
 - [x] 7.5 Run `openspec validate remove-noop-phase-tasks --strict`
 - [x] 7.6 Run `gitnexus_detect_changes()` and confirm only the expected symbols and execution flows changed before committing
+
+## 8. Review remediations
+
+- [x] 8.1 Validate all Replan addition roles before any UnitOfWork mutation and regression-test that a caught validation error followed by commit leaves Run, Plan, and Task versions unchanged
+- [x] 8.2 Exempt only the fixed Writing deliverable `report.md`; preserve Plan coverage validation for every other CompletionContract path and add a regression test
+- [x] 8.3 Run focused and full tests, strict OpenSpec validation, targeted formatting/lint checks, and canonical GitNexus impact/detect checks after the review fixes; record the linked-worktree diff limitation

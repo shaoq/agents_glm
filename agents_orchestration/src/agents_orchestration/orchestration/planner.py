@@ -10,13 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents_orchestration.domain.enums import CapabilityKind, EffectType, RunState, TaskState, WorkerRole
+from agents_orchestration.domain.enums import (
+    CapabilityKind,
+    EffectType,
+    RunState,
+    TaskState,
+    WorkerRole,
+)
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.goal import CompletionContract
 from agents_orchestration.domain.plan import Plan, PlanGraph
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.orchestration.proposals import PlanProposal
+
+_FIXED_LIFECYCLE_DELIVERABLES = frozenset({"report.md"})
 
 
 @dataclass(frozen=True)
@@ -77,9 +85,13 @@ class PlanValidator:
                     f"dependency references unknown task {dep.predecessor}->{dep.successor}"
                 )
 
-        # Final deliverables (e.g. report.md) are owned by fixed lifecycle phases
-        # (Writing), not by dispatchable research Tasks, so Plan validation does
-        # not require a Task to produce them (remove-noop-phase-tasks 1.6).
+        produced = {s.deliverable_path for s in graph.task_specs if s.deliverable_path}
+        produced |= set(proposal.deliverable_paths)
+        for path in completion.deliverable_paths:
+            if path in _FIXED_LIFECYCLE_DELIVERABLES:
+                continue
+            if path not in produced:
+                diagnostics.append(f"required deliverable {path} is not produced by the Plan")
 
         accepted = not diagnostics and graph.task_count > 0
         return PlanValidation(accepted, tuple(diagnostics), graph if accepted else None)
