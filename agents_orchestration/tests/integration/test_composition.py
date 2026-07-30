@@ -61,7 +61,15 @@ async def test_deterministic_composition_drives_clear_goal_to_succeeded(backend)
     with backend.unit_of_work() as uow:
         final = uow.runs.get(run.run_id)
         assert final.state is RunState.SUCCEEDED
-        assert len(uow.artifacts.list_all()) == 3  # report.md / report.json / run-summary.json
+        # report.md / report.json / run-summary.json plus the ANALYZE-accepted
+        # analysis artifact now materialized by the handoff (task 3.3).
+        kinds = {a.kind for a in uow.artifacts.list_all()}
+        assert {
+            "report_markdown",
+            "report_json",
+            "run_summary",
+            "analysis",
+        } <= kinds
         uow.commit()
 
 

@@ -47,6 +47,7 @@ def build_production_coordinator(
     report_provider,
     deliverables_provider,
     allowed_capabilities,
+    analysis_artifact_store=None,
     limits: SystemLimits | None = None,
     approval_required: bool = False,
 ) -> RunCoordinator:
@@ -59,6 +60,10 @@ def build_production_coordinator(
     diagnostics come from ``capability_doctor`` (task 9.9). Model-backed port
     implementations (LLM prompt + structured-output parse) are supplied by the
     caller — they are prompt-engineering work, not composition wiring.
+
+    ``analysis_artifact_store`` defaults to ``None`` and is validated here so a
+    missing artifact port raises :class:`CompositionError` (analyze-sufficiency-
+    feedback Decision 10 / task 8.1) rather than a ``TypeError`` downstream.
     """
 
     ports = {
@@ -73,6 +78,7 @@ def build_production_coordinator(
         "analysis_provider": analysis_provider,
         "report_provider": report_provider,
         "deliverables_provider": deliverables_provider,
+        "analysis_artifact_store": analysis_artifact_store,
     }
     missing = sorted(name for name, port in ports.items() if port is None)
     if missing:
@@ -100,6 +106,7 @@ def build_production_coordinator(
         AnalysisPhaseHandler.phase: AnalysisPhaseHandler(
             analyst,
             evidence_set,
+            analysis_artifact_store,
             clock=backend.clock,
             idgen=backend.idgen,
         ),
@@ -144,9 +151,10 @@ def build_production_coordinator_from_settings(
     With no registry, research Tasks find no capability and degrade honestly
     (no fabricated evidence).
 
-    TODO: AnalysisArtifact/ReportContent are not yet persisted across phases, so
-    analysis_provider/report_provider re-invoke the LLM (MVP — accepts a double
-    call; persist outputs in a follow-up to avoid it).
+    AnalysisArtifact is now persisted by the ANALYZE phase and loaded by the
+    WRITING/FINALIZE providers via the accepted-stage handoff
+    (analyze-sufficiency-feedback task 3.3); ReportContent is still re-derived
+    by report_provider (a follow-up can persist it the same way).
     """
 
     from agents_orchestration.adapters.base import ModelProfile
@@ -198,6 +206,17 @@ def build_production_coordinator_from_settings(
     }
     executor = WorkerExecutor(workers, router, handlers, policy)
 
+    from agents_orchestration.orchestration.analysis_artifact import (
+        MissingAcceptedAnalysisError,
+        SqliteAnalysisArtifactStore,
+        accepted_analysis_ref,
+    )
+    from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
+
+    analysis_artifact_store = SqliteAnalysisArtifactStore(
+        SqliteArtifactStore(backend.conn, backend.artifact_dir)
+    )
+
     async def research_evidence(run_id: str):
         with backend.unit_of_work() as uow:
             return tuple(uow.evidence.by_run(run_id))
@@ -208,8 +227,20 @@ def build_production_coordinator_from_settings(
         return EvidenceSet.join(run_id=run_id, task_id="research", evidences=evs, required=False)
 
     async def analysis_provider(run_id: str):
-        ev = await evidence_set(run_id)
-        return await analyst(run_id, ev)
+        # WRITING/FINALIZE load the ANALYZE-accepted artifact; the analyst is no
+        # longer re-invoked downstream (analyze-sufficiency-feedback task 3.3).
+        with backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            plan_version = run.current_plan_version if run is not None else None
+            ref = (
+                accepted_analysis_ref(uow.stages, run_id, plan_version)
+                if plan_version is not None
+                else None
+            )
+            uow.commit()
+        if ref is None:
+            raise MissingAcceptedAnalysisError(f"no accepted analysis for run {run_id}")
+        return await analysis_artifact_store.load(ref)
 
     async def report_provider(run_id: str):
         analysis = await analysis_provider(run_id)
@@ -232,6 +263,7 @@ def build_production_coordinator_from_settings(
         report_provider=report_provider,
         deliverables_provider=deliverables_provider,
         allowed_capabilities=registry.allowed_kinds(),
+        analysis_artifact_store=analysis_artifact_store,
         limits=limits,
     )
 

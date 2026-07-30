@@ -21,6 +21,9 @@ from agents_orchestration.domain.goal import (
     CriterionKind,
 )
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+from agents_orchestration.orchestration.analysis_artifact import (
+    SqliteAnalysisArtifactStore,
+)
 from agents_orchestration.orchestration.coordinator import RunCoordinator
 from agents_orchestration.orchestration.phases import (
     AnalysisPhaseHandler,
@@ -33,8 +36,13 @@ from agents_orchestration.orchestration.report import (
     ReportContent,
     ReviewProposal,
 )
+from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
 
 NOW = datetime(2026, 7, 28, tzinfo=UTC)
+
+
+def _analysis_store(backend) -> SqliteAnalysisArtifactStore:
+    return SqliteAnalysisArtifactStore(SqliteArtifactStore(backend.conn, backend.artifact_dir))
 
 
 def _seed_run(backend, state: RunState, plan_version: int = 1) -> Run:
@@ -67,7 +75,9 @@ async def test_analysis_produces_artifact_to_writing(backend) -> None:
     async def analyst(run_id, evidence):
         return AnalysisArtifact(run_id=run_id, conclusions=("c1",))
 
-    handler = AnalysisPhaseHandler(analyst, _evidence, clock=backend.clock, idgen=backend.idgen)
+    handler = AnalysisPhaseHandler(
+        analyst, _evidence, _analysis_store(backend), clock=backend.clock, idgen=backend.idgen
+    )
     report = await RunCoordinator(backend, {PhaseId.ANALYZE: handler}).advance(run.run_id)
     assert report.disposition is AdvanceDisposition.PROGRESSED
     assert report.to_state is RunState.WRITING
@@ -84,7 +94,11 @@ async def test_analysis_provider_failure_degrades_to_idle(backend) -> None:
         raise RuntimeError("analyst down")
 
     handler = AnalysisPhaseHandler(
-        failing_analyst, _evidence, clock=backend.clock, idgen=backend.idgen
+        failing_analyst,
+        _evidence,
+        _analysis_store(backend),
+        clock=backend.clock,
+        idgen=backend.idgen,
     )
     report = await RunCoordinator(backend, {PhaseId.ANALYZE: handler}).advance(run.run_id)
     assert report.disposition is AdvanceDisposition.IDLE

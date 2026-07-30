@@ -127,7 +127,36 @@ async def deliverables_provider(run_id: str) -> dict[str, bool]:
 def build_deterministic_coordinator(backend) -> RunCoordinator:
     """Deterministic coordinator for tests: feeds the real production
     composition root (``build_production_coordinator``) with stub phase ports,
-    so a full Goal -> artifacts lifecycle runs without any live provider."""
+    so a full Goal -> artifacts lifecycle runs without any live provider.
+
+    The ANALYZE-accepted AnalysisArtifact is materialized and loaded back by the
+    downstream providers, so the deterministic lifecycle exercises the real
+    accepted-stage handoff (analyze-sufficiency-feedback task 3.3/3.5)."""
+
+    from agents_orchestration.orchestration.analysis_artifact import (
+        MissingAcceptedAnalysisError,
+        SqliteAnalysisArtifactStore,
+        accepted_analysis_ref,
+    )
+    from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
+
+    artifact_store = SqliteAnalysisArtifactStore(
+        SqliteArtifactStore(backend.conn, backend.artifact_dir)
+    )
+
+    async def accepted_analysis_provider(run_id: str) -> AnalysisArtifact:
+        with backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            plan_version = run.current_plan_version if run is not None else None
+            ref = (
+                accepted_analysis_ref(uow.stages, run_id, plan_version)
+                if plan_version is not None
+                else None
+            )
+            uow.commit()
+        if ref is None:
+            raise MissingAcceptedAnalysisError(f"no accepted analysis for run {run_id}")
+        return await artifact_store.load(ref)
 
     return build_production_coordinator(
         backend,
@@ -139,9 +168,10 @@ def build_deterministic_coordinator(backend) -> RunCoordinator:
         reviewer=FakeReviewer(),
         research_evidence=research_evidence,
         evidence_set=evidence_set,
-        analysis_provider=analysis_provider,
+        analysis_provider=accepted_analysis_provider,
         report_provider=report_provider,
         deliverables_provider=deliverables_provider,
         allowed_capabilities=frozenset(CapabilityKind),
+        analysis_artifact_store=artifact_store,
         limits=SystemLimits(),
     )

@@ -72,7 +72,15 @@ class _FailOnceExecutor:
 
 
 def _coordinator_with_executor(backend, executor) -> RunCoordinator:
+    from agents_orchestration.orchestration.analysis_artifact import (
+        SqliteAnalysisArtifactStore,
+    )
+    from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
+
     limits = SystemLimits()
+    artifact_store = SqliteAnalysisArtifactStore(
+        SqliteArtifactStore(backend.conn, backend.artifact_dir)
+    )
     return build_production_coordinator(
         backend,
         executor=executor,
@@ -87,6 +95,7 @@ def _coordinator_with_executor(backend, executor) -> RunCoordinator:
         report_provider=report_provider,
         deliverables_provider=deliverables_provider,
         allowed_capabilities=frozenset(CapabilityKind),
+        analysis_artifact_store=artifact_store,
         limits=limits,
     )
 

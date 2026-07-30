@@ -48,4 +48,6 @@ async def test_start_and_drive_clear_goal_reaches_succeeded(
 ) -> None:
     run = await service.start_and_drive("clear well-scoped goal", request_id="r3")
     assert run.state is RunState.SUCCEEDED
-    assert len(service.list_artifacts()) == 3  # report.md/json/run-summary.json
+    kinds = {a.kind.value for a in service.list_artifacts()}
+    # report.md/json/run-summary.json + the ANALYZE-accepted analysis artifact (task 3.3)
+    assert {"report_markdown", "report_json", "run_summary", "analysis"} <= kinds

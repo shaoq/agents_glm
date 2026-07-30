@@ -57,6 +57,7 @@ from agents_orchestration.orchestration.report import (
     ReportContent,
     ReviewProposal,
 )
+from agents_orchestration.orchestration.sufficiency import source_evidence_hash
 
 
 def _fingerprint(state_version: int, plan_version: int | None = None) -> InputFingerprint:
@@ -360,13 +361,22 @@ def _simple_accept(outcome: PhaseOutcome, run: Run, uow, now) -> Run:
 
 class AnalysisPhaseHandler:
     """ANALYZING phase (tasks 7.2/7.3): drive Analyst Tasks, then produce an
-    immutable AnalysisArtifact bound to the EvidenceSet before WRITING."""
+    immutable AnalysisArtifact bound to the EvidenceSet before WRITING.
+
+    The accepted Analysis is materialized as a content-addressed artifact and
+    recorded on the ACCEPTED ANALYZE Stage via ``output_refs`` /
+    ``output_entities``; WRITING loads that same artifact instead of re-invoking
+    the analyst (analyze-sufficiency-feedback Decision 5 / task 3.3).
+    """
 
     phase = PhaseId.ANALYZE
 
-    def __init__(self, analyst: Analyst, evidence_provider, *, clock, idgen) -> None:
+    def __init__(
+        self, analyst: Analyst, evidence_provider, artifact_store, *, clock, idgen
+    ) -> None:
         self.analyst = analyst
         self.evidence_provider = evidence_provider
+        self.artifact_store = artifact_store
         self.clock = clock
         self.idgen = idgen
 
@@ -375,6 +385,12 @@ class AnalysisPhaseHandler:
         try:
             evidence = await self.evidence_provider(ctx.run.run_id)
             analysis = await self.analyst(ctx.run.run_id, evidence)
+            ref = await self.artifact_store.materialize(
+                run_id=ctx.run.run_id,
+                plan_version=ctx.run.current_plan_version or 0,
+                analysis=analysis,
+                source_evidence_hash=source_evidence_hash(evidence),
+            )
         except Exception as exc:  # provider failure -> degrade
             return PhaseOutcome(
                 disposition=AdvanceDisposition.IDLE,
@@ -390,6 +406,8 @@ class AnalysisPhaseHandler:
             stage_logical_key="analyze",
             input_fingerprint=fp,
             proposal=analysis,
+            output_refs=(ref.as_artifact_ref(),),
+            output_entities=(ref.artifact_id,),
         )
 
     accept = staticmethod(_simple_accept)

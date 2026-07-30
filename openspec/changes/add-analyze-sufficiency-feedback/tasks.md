@@ -14,11 +14,11 @@
 
 ## 3. AnalysisArtifact 权威持久化与加载
 
-- [ ] 3.1 增加 content-addressed `AnalysisArtifact` 物化/加载 port，artifact ref 包含 entity ID、content hash、run ID、plan version 与 source Evidence hash
-- [ ] 3.2 让 ACCEPTED ANALYZE Stage 的 `output_artifact_refs` 成为当前 Plan 权威 Analysis 的唯一选择依据；未引用或 stale artifact 不可被加载
-- [ ] 3.3 将生产 `analysis_provider` 改为从当前 Plan 最新 ACCEPTED ANALYZE Stage 加载 artifact，删除 WRITING/FINALIZE 路径中对 analyst 的重复调用
-- [ ] 3.4 单测与集成测试覆盖 artifact round-trip、hash 校验、未引用 blob 隔离、stale candidate 隔离及缺失 accepted artifact 的明确失败
-- [ ] 3.5 集成测试断言 reviewer 审查、ANALYZE Stage 接受和 writer 消费的是同一 Analysis entity ID/content hash
+- [x] 3.1 增加 content-addressed `AnalysisArtifact` 物化/加载 port，artifact ref 包含 entity ID、content hash、run ID、plan version 与 source Evidence hash
+- [x] 3.2 让 ACCEPTED ANALYZE Stage 的 `output_artifact_refs` 成为当前 Plan 权威 Analysis 的唯一选择依据；未引用或 stale artifact 不可被加载
+- [x] 3.3 将生产 `analysis_provider` 改为从当前 Plan 最新 ACCEPTED ANALYZE Stage 加载 artifact，删除 WRITING/FINALIZE 路径中对 analyst 的重复调用
+- [x] 3.4 单测与集成测试覆盖 artifact round-trip、hash 校验、未引用 blob 隔离、stale candidate 隔离及缺失 accepted artifact 的明确失败
+- [x] 3.5 集成测试断言 reviewer 审查、ANALYZE Stage 接受和 writer 消费的是同一 Analysis entity ID/content hash
 
 ## 4. 原子 Focused Replan 接受
 

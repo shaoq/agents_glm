@@ -45,7 +45,13 @@ async def test_restart_resumes_from_durable_state(tmp_path) -> None:
     await svc2.drive_run(run.run_id)
     final = svc2.get_run(run.run_id)
     assert final.state is RunState.SUCCEEDED
-    assert len(svc2.list_artifacts()) == 3  # no duplicate final artifacts (11.7)
+    kinds = [a.kind.value for a in svc2.list_artifacts()]
+    # No duplicate final report artifacts on restart (11.7); the ANALYZE-accepted
+    # analysis artifact is also present exactly once (task 3.3).
+    assert kinds.count("report_markdown") == 1
+    assert kinds.count("report_json") == 1
+    assert kinds.count("run_summary") == 1
+    assert kinds.count("analysis") == 1
 
 
 @pytest.mark.integration
