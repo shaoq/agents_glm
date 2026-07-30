@@ -67,8 +67,8 @@
 
 ## 10. 端到端闭环与交付验证
 
-- [ ] 10.1 E2E：ANALYZE 判 gap → 原子 Plan v+1 → RuntimeTick 派发新 Task/Attempt/Lease → 采回新增 Evidence → 再 ANALYZE 判 sufficient → WRITE → REVIEW → FINALIZE
-- [ ] 10.2 E2E 断言闭环中 `current_plan_version`、`replan_count`、Task IDs、Evidence 数与 artifact hash 均真实变化，且不存在旧 SUCCEEDED Task 的空转重放
-- [ ] 10.3 E2E：L0 零证据短路、conflict 交由 REVIEW、budget 耗尽终止和 provider failure 停止立即驱动
-- [ ] 10.4 运行 `openspec validate add-analyze-sufficiency-feedback --strict`、完整测试套件、ruff 与覆盖率检查，保持项目要求的覆盖率阈值
-- [ ] 10.5 实施完成且提交前运行 `gitnexus_detect_changes()`，确认只影响预期 symbols 与 execution flows
+- [x] 10.1 E2E：ANALYZE 判 gap → 原子 Plan v+1 → RuntimeTick 派发新 Task/Attempt/Lease → 采回新增 Evidence → 再 ANALYZE 判 sufficient → WRITE → REVIEW → FINALIZE
+- [x] 10.2 E2E 断言闭环中 `current_plan_version`、`replan_count`、Task IDs、Evidence 数与 artifact hash 均真实变化，且不存在旧 SUCCEEDED Task 的空转重放
+- [x] 10.3 E2E：L0 零证据短路、conflict 交由 REVIEW、budget 耗尽终止和 provider failure 停止立即驱动
+- [x] 10.4 运行 `openspec validate add-analyze-sufficiency-feedback --strict`、完整测试套件、ruff 与覆盖率检查，保持项目要求的覆盖率阈值
+- [x] 10.5 实施完成且提交前运行 `gitnexus_detect_changes()`，确认只影响预期 symbols 与 execution flows
