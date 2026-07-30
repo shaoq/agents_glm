@@ -21,6 +21,8 @@ from agents_orchestration.orchestration.sufficiency import (
     GAP_HINT_MAX_LEN,
     RATIONALE_MAX_LEN,
     AnalysisSufficiencyOutcome,
+    FocusedReplan,
+    SanitizedGap,
     SufficiencyReview,
     SufficiencyValidationError,
     source_evidence_hash,
@@ -33,8 +35,8 @@ def _analysis(run_id: str = "r1") -> AnalysisArtifact:
     )
 
 
-def _focused_replan(run_id: str = "r1") -> ReplanProposal:
-    return ReplanProposal(
+def _focused_replan(run_id: str = "r1") -> FocusedReplan:
+    proposal = ReplanProposal(
         run_id=run_id,
         reason="gap",
         add_task_specs=(
@@ -46,6 +48,10 @@ def _focused_replan(run_id: str = "r1") -> ReplanProposal:
                 branch_role=BranchRole.REQUIRED,
             ),
         ),
+    )
+    return FocusedReplan(
+        proposal=proposal,
+        gap=SanitizedGap(cleaned="need more data", gap_id="gap:abc", focus_hash="focus:def"),
     )
 
 

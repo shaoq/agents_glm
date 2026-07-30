@@ -83,6 +83,34 @@ class SufficiencyReview:
 
 
 @dataclass(frozen=True)
+class SanitizedGap:
+    """A cleaned, length-bounded research gap with stable correlation ids (task 2.1).
+
+    ``gap_id`` identifies the gap across a replan loop; ``focus_hash`` binds the
+    gap to the objective it was filed against, so ``PLAN_REPLANNED`` and the
+    accepted ANALYZE Stage can correlate gap → Plan v+1 → new Evidence → later
+    sufficient (task 9.1) without free-text matching.
+    """
+
+    cleaned: str
+    gap_id: str
+    focus_hash: str
+
+
+@dataclass(frozen=True)
+class FocusedReplan:
+    """A plan-scoped focused replan proposal plus its sanitized gap context.
+
+    The ``proposal`` is the bounded :class:`ReplanProposal` consumed by the atomic
+    ``replan_and_transition`` (task 4.1); ``gap`` carries the correlation ids that
+    the coordinator records in ``PLAN_REPLANNED`` and the ANALYZE Stage.
+    """
+
+    proposal: ReplanProposal
+    gap: SanitizedGap
+
+
+@dataclass(frozen=True)
 class AnalysisSufficiencyOutcome:
     """The ANALYZE phase outcome consumed by ``AnalysisPhaseHandler.accept``.
 
@@ -100,7 +128,7 @@ class AnalysisSufficiencyOutcome:
     review: SufficiencyReview
     source_evidence_hash: str
     analysis: AnalysisArtifact | None = None
-    focused_replan: ReplanProposal | None = None
+    focused_replan: FocusedReplan | None = None
 
     def __post_init__(self) -> None:
         review = self.review
@@ -153,6 +181,8 @@ __all__ = [
     "GAP_HINT_MAX_LEN",
     "RATIONALE_MAX_LEN",
     "AnalysisSufficiencyOutcome",
+    "FocusedReplan",
+    "SanitizedGap",
     "SufficiencyReview",
     "SufficiencyValidationError",
     "source_evidence_hash",

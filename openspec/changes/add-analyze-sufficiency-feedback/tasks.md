@@ -7,10 +7,10 @@
 
 ## 2. gap 清洗与 FocusedReplanBuilder
 
-- [ ] 2.1 实现 gap sanitizer：移除控制字符、去空白、固定长度上限，并生成稳定 `gap_id`/`focus_hash`
-- [ ] 2.2 实现确定性的 `FocusedReplanBuilder`：用 effective objective 与带“不可信数据”标签的 gap 构造至少一个新 `EVIDENCE_RESEARCHER TaskSpec`
-- [ ] 2.3 新 Task 只继承并收窄当前 Plan 已批准且 allowlist 允许的 research capabilities，不从 gap 文本解析 role、capability、权限或路由
-- [ ] 2.4 单测验证新 task ID、PENDING research role、objective 保留、focus 模板、capability 收窄及恶意 gap 无法扩大权限
+- [x] 2.1 实现 gap sanitizer：移除控制字符、去空白、固定长度上限，并生成稳定 `gap_id`/`focus_hash`
+- [x] 2.2 实现确定性的 `FocusedReplanBuilder`：用 effective objective 与带“不可信数据”标签的 gap 构造至少一个新 `EVIDENCE_RESEARCHER TaskSpec`
+- [x] 2.3 新 Task 只继承并收窄当前 Plan 已批准且 allowlist 允许的 research capabilities，不从 gap 文本解析 role、capability、权限或路由
+- [x] 2.4 单测验证新 task ID、PENDING research role、objective 保留、focus 模板、capability 收窄及恶意 gap 无法扩大权限
 
 ## 3. AnalysisArtifact 权威持久化与加载
 
