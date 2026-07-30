@@ -26,10 +26,10 @@
 CLI / Python API → OrchestrationService → RunCoordinator.advance
   ├── CREATED → NORMALIZING（Goal：normalize + Completion Contract）
   ├── PLANNING（Plan：propose + 确定性 validate + accept，可选 PLAN_APPROVAL Gate）
-  ├── RESEARCHING（EVIDENCE_RESEARCHER Task + Evidence Join → EvidenceSet）
-  ├── ANALYZING（ANALYST Task → AnalysisArtifact）
-  ├── WRITING（REPORT_WRITER Task → Report Draft）
-  ├── REVIEWING（REPORT_REVIEWER → PASS/REVISE/RESEARCH_GAP/CONFLICT/ESCALATE，有界 revision/Replan）
+  ├── RESEARCHING（唯一的 Task 派发阶段：EVIDENCE_RESEARCHER Task + Evidence Join → EvidenceSet）
+  ├── ANALYZING（Analyst phase port → AnalysisArtifact，不经 Task 派发）
+  ├── WRITING（ReportWriter phase port → Report Draft）
+  ├── REVIEWING（ReportReviewer phase port → PASS/REVISE/RESEARCH_GAP/CONFLICT/ESCALATE，有界 revision/Replan）
   └── FINALIZING（CompletionEvaluator + ReportBuilder + Finalizer → terminal + report artifacts）
 ```
 
@@ -37,7 +37,7 @@ CLI / Python API → OrchestrationService → RunCoordinator.advance
 - model / evidence 内容只能发 Proposal，正式 state 转换由确定性组件决定；
 - Gate 携带 version-bound continuation，consume 时确定性恢复下一 phase（caller 无法任意指定 target）；
 - `--create-only` 只持久化 CREATED Run；`runtime tick RUN_ID` 为单次 advance；`runtime watch` 循环 advance；
-- `TaskRuntimeTick` 仍是 Task attempt 执行单元，按当前 phase 过滤 eligible Worker role。
+- `TaskRuntimeTick` 仅在 `RESEARCHING` 派发 Task（硬状态 guard，`eligible_worker_roles` 对非 Task 阶段返回显式空集）；ANALYZE/WRITE/REVIEW 由 coordinator-owned phase port 直调，不生成/派发 Task（remove-noop-phase-tasks）。
 - **task 重试真正生效**：retryable 失败的 task 进入 `AWAITING_RETRY` 后，下一次 Tick 在 backoff 到期时
   自动转回 `READY` 重新派发（指数退避 `base*2^(n-1)`，封顶 60s，确定性基于 clock），重试预算用尽
   （`max_attempts_per_task`）才 `FAILED`。backoff 未到期属于 WAITING：不消耗 phase IDLE 预算，

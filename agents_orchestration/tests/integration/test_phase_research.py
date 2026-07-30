@@ -63,20 +63,37 @@ def _seed_task(backend, run: Run, task_id: str, role: WorkerRole, state: TaskSta
 
 
 @pytest.mark.unit
-def test_eligible_worker_roles_maps_each_task_phase() -> None:
-    expected = {
-        RunState.RESEARCHING: frozenset({WorkerRole.EVIDENCE_RESEARCHER}),
-        RunState.ANALYZING: frozenset({WorkerRole.ANALYST}),
-        RunState.WRITING: frozenset({WorkerRole.REPORT_WRITER}),
-        RunState.REVIEWING: frozenset({WorkerRole.REPORT_REVIEWER}),
-    }
-    for state, roles in expected.items():
-        assert eligible_worker_roles(state) == roles
+def test_eligible_worker_roles_only_research_dispatches() -> None:
+    # Only RESEARCHING has a dispatchable role (remove-noop-phase-tasks 2.2);
+    # ANALYZE/WRITE/REVIEW are coordinator-owned ports, not dispatched phases.
+    assert eligible_worker_roles(RunState.RESEARCHING) == frozenset({WorkerRole.EVIDENCE_RESEARCHER})
 
 
 @pytest.mark.unit
-def test_eligible_worker_roles_none_for_non_task_phases() -> None:
-    for state in (RunState.NORMALIZING, RunState.PLANNING, RunState.FINALIZING, RunState.PAUSED):
+def test_eligible_worker_roles_empty_for_active_non_task_phases() -> None:
+    # Active non-Task phases return an explicit empty set, never None
+    # (remove-noop-phase-tasks 2.2: None is not an implicit "dispatch nothing").
+    for state in (
+        RunState.NORMALIZING,
+        RunState.PLANNING,
+        RunState.ANALYZING,
+        RunState.WRITING,
+        RunState.REVIEWING,
+        RunState.FINALIZING,
+    ):
+        assert eligible_worker_roles(state) == frozenset()
+
+
+@pytest.mark.unit
+def test_eligible_worker_roles_none_only_for_non_active_states() -> None:
+    for state in (
+        RunState.PAUSED,
+        RunState.AWAITING_PLAN_APPROVAL,
+        RunState.AWAITING_FINAL_REVIEW,
+        RunState.SUCCEEDED,
+        RunState.FAILED,
+        RunState.CANCELED,
+    ):
         assert eligible_worker_roles(state) is None
 
 
@@ -100,6 +117,30 @@ async def test_tick_filters_dispatch_by_phase_role(backend) -> None:
         assert uow.tasks.get("research-1").state is TaskState.SUCCEEDED
         assert uow.tasks.get("writer-1").state is TaskState.PENDING  # not dispatched
         uow.commit()
+
+
+@pytest.mark.integration
+async def test_tick_hard_guard_blocks_non_researching_active_states(backend) -> None:
+    """remove-noop-phase-tasks 2.1: only RESEARCHING may schedule. Active
+    non-Task states with a ready research Task dispatch nothing and leave the
+    Task undisturbed (no Lease/Attempt/dispatch created)."""
+
+    for state in (
+        RunState.NORMALIZING,
+        RunState.PLANNING,
+        RunState.ANALYZING,
+        RunState.WRITING,
+        RunState.REVIEWING,
+        RunState.FINALIZING,
+    ):
+        run = _seed_run(backend, state)
+        _seed_task(backend, run, "r-guard", WorkerRole.EVIDENCE_RESEARCHER, TaskState.READY)
+        tick = RuntimeTick(backend, executor=_FakeExecutor(), limits=SystemLimits())
+        report = await tick.tick(run.run_id)
+        assert report.dispatched == 0
+        with backend.unit_of_work() as uow:
+            assert uow.tasks.get("r-guard").state is TaskState.READY  # not dispatched
+            uow.commit()
 
 
 # --- Task 6.7 / 6.8 / 6.10: ResearchPhaseHandler ---------------------------

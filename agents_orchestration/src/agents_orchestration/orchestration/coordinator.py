@@ -51,7 +51,9 @@ from agents_orchestration.domain.enums import (
     FailureCode,
     GateType,
     RunState,
+    TaskState,
     TerminationReason,
+    WorkerRole,
 )
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run
@@ -155,6 +157,8 @@ class RunCoordinator:
 
         if run.state is RunState.CREATED:  # task 4.1: CREATED -> NORMALIZING
             return self._advance_created(run)
+
+        self._reconcile_legacy_tasks(run_id)  # remove-noop-phase-tasks 5.x
 
         phase = phase_for_state(run.state)
         if phase is None:  # task 4.3: paused / gate-waiting have no active phase
@@ -469,6 +473,52 @@ class RunCoordinator:
             PhaseId.REVIEW: CheckpointKind.REPLAN,
             PhaseId.FINALIZE: CheckpointKind.FINALIZATION,
         }.get(phase, CheckpointKind.RETRY)
+
+    # --- legacy Plan reconciliation (remove-noop-phase-tasks 5.x) -----------
+
+    def _reconcile_legacy_tasks(self, run_id: str) -> None:
+        """Retire non-research Tasks carried by a legacy (pre-upgrade) Plan,
+        without dispatching them. PENDING/READY → SKIPPED;
+        DISPATCHED/AWAITING_RETRY → CANCELED with active leases invalidated so
+        late results cannot advance the Run. Terminal history is preserved.
+        Idempotent — terminal Tasks are never touched."""
+
+        now = self.backend.clock.now()
+        idgen = self.backend.idgen
+        events: list[DomainEvent] = []
+        with self.backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            if run is None or run.current_plan_version is None:
+                uow.commit()
+                return
+            for task in uow.tasks.by_run(run_id, plan_version=run.current_plan_version):
+                if task.worker_role is WorkerRole.EVIDENCE_RESEARCHER:
+                    continue
+                if task.state in (TaskState.PENDING, TaskState.READY):
+                    uow.tasks.save(task.transition(TaskState.SKIPPED, now))
+                    events.append(self._legacy_event(run, task, "skipped", now, idgen))
+                elif task.state in (TaskState.DISPATCHED, TaskState.AWAITING_RETRY):
+                    lease = uow.leases.get(task.task_id)
+                    if lease is not None and lease.state.is_active:
+                        uow.leases.save(lease.expire(), expected_epoch=lease.epoch)
+                    uow.tasks.save(task.transition(TaskState.CANCELED, now))
+                    events.append(self._legacy_event(run, task, "canceled", now, idgen))
+            if events:
+                uow.events.append(events)
+            uow.commit()
+
+    @staticmethod
+    def _legacy_event(run, task, action, now, idgen) -> DomainEvent:
+        return DomainEvent(
+            event_id=idgen.new_id("evt"),
+            run_id=run.run_id,
+            effect=EffectType.TASK_STATE_TRANSITION,
+            state_version=run.state_version,
+            occurred_at=now,
+            task_id=task.task_id,
+            plan_version=run.current_plan_version,
+            payload={"legacy_reconcile": action, "role": task.worker_role.value},
+        )
 
     # --- read helpers --------------------------------------------------------
 

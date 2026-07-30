@@ -32,15 +32,16 @@ from tests.support.service_factory import build_test_service
 
 
 def _contract(deliverable: str = "report.md") -> CompletionContract:
+    # Deterministic e2e has no real evidence, so the contract only requires the
+    # final deliverable (report.md); FINALIZE evaluates it against
+    # deliverables_provider and reaches SUCCEEDED (remove-noop-phase-tasks: the
+    # Writing phase owns report.md, no research Task claims it).
     return CompletionContract(
         criteria=(
             CompletionCriterion(
                 kind=CriterionKind.DELIVERABLE,
                 description=deliverable,
                 deliverable_path=deliverable,
-            ),
-            CompletionCriterion(
-                kind=CriterionKind.EVIDENCE_SUFFICIENCY, description="enough evidence"
             ),
         ),
         deliverable_paths=(deliverable,),
@@ -151,7 +152,9 @@ async def test_full_research_run_goal_plan_research_finalize(service) -> None:
         effects = [e.effect.value for e in uow.events.stream(run.run_id)]
         assert "task_dispatched" in effects and "attempt_accepted" in effects
 
-    _finalize(service, run.run_id, _contract_used)
+    # drive_run now advances through ANALYZE/WRITE/REVIEW/FINALIZE directly via
+    # coordinator-owned ports (remove-noop-phase-tasks), so the Run reaches
+    # SUCCEEDED and persists the 3 report artifacts without a manual finalize.
     with service.backend.unit_of_work() as uow:
         final = uow.runs.get(run.run_id)
         assert final.state is RunState.SUCCEEDED

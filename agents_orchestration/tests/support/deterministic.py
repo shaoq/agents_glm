@@ -60,9 +60,9 @@ class FakeGoalNormalizer:
 
 
 class FakePlanner:
-    """Proposes one Task per phase-eligible Worker role so each task phase has
-    its own work to drive (phase-role filtering dispatches only the current
-    phase's role)."""
+    """Proposes research-only Tasks (remove-noop-phase-tasks 6.5): analysis,
+    writing, and review run as coordinator-owned phase ports, not as
+    dispatchable Tasks, so the deterministic plan contains only research work."""
 
     async def propose_plan(self, goal, completion, run_id: str) -> PlanProposal:
         specs = (
@@ -70,16 +70,6 @@ class FakePlanner:
                 task_id="research-1",
                 worker_role=WorkerRole.EVIDENCE_RESEARCHER,
                 description="gather evidence",
-            ),
-            TaskSpec(task_id="analyze-1", worker_role=WorkerRole.ANALYST, description="analyze"),
-            TaskSpec(
-                task_id="write-1",
-                worker_role=WorkerRole.REPORT_WRITER,
-                description="write",
-                deliverable_path=_DELIVERABLE,
-            ),
-            TaskSpec(
-                task_id="review-1", worker_role=WorkerRole.REPORT_REVIEWER, description="review"
             ),
         )
         return PlanProposal(

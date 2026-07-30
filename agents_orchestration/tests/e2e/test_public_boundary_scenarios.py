@@ -93,7 +93,6 @@ async def test_e2e_research_gap_replan_gate(service: OrchestrationService) -> No
         return ReportContent(run_id=run_id, title="T", objective="O")
 
     coord.handlers[PhaseId.REVIEW] = ReviewPhaseHandler(
-        coord.handlers[PhaseId.RESEARCH].tick,  # share the deterministic executor's tick
         _GapReviewer(),
         _report_provider,
         clock=service.backend.clock,

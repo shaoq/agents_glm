@@ -129,7 +129,13 @@ def test_validator_rejects_cycle_and_unsupported_capability(backend, fake_clock)
 
 
 @pytest.mark.integration
-def test_validator_rejects_missing_deliverable(backend, fake_clock) -> None:
+def test_validator_no_longer_requires_task_to_produce_final_deliverable(
+    backend, fake_clock
+) -> None:
+    """report.md is owned by the fixed Writing phase, not a research Task
+    (remove-noop-phase-tasks 1.6): a research-only plan that does not claim the
+    final deliverable is still accepted."""
+
     _run_planning(backend, fake_clock)
     proposal = PlanProposal(
         run_id="r1", plan_id="p1", task_specs=(_research_spec("t1"),), deliverable_paths=()
@@ -142,8 +148,7 @@ def test_validator_rejects_missing_deliverable(backend, fake_clock) -> None:
             allowed_capabilities=ALLOWED,
             completion=_completion(),
         )
-    assert not result.accepted
-    assert any("report.md" in d for d in result.diagnostics)
+    assert result.accepted
 
 
 # --- 5.6 / 5.7 PlanAcceptor -------------------------------------------------
