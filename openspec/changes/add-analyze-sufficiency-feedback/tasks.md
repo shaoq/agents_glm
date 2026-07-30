@@ -45,11 +45,11 @@
 
 ## 7. REVIEW research gap 接入共享 Focused Replan
 
-- [ ] 7.1 在 REVIEW `RESEARCH_GAP` 打开 Gate 时持久化足以构造 Focused Replan 的限长 feedback/correlation 数据，打开 Gate 本身不递增 `replan_count`
-- [ ] 7.2 将合法“继续研究”Gate continuation 从单纯状态回跳改为调用同一 `FocusedReplanBuilder + replan_and_transition`
-- [ ] 7.3 Gate continuation 接受时重新检查 `max_replans`；已耗尽则不创建 Plan/Task并以 `REQUIRED_EVIDENCE_MISSING` 终止
-- [ ] 7.4 集成测试覆盖 Gate 打开零计数、合法响应创建 Plan v+1/新 PENDING Task、重复响应幂等、stale response 失效及接受时预算耗尽
-- [ ] 7.5 回归既有 REVIEW PASS/REVISE/CONFLICT/ESCALATE、Gate 取消/过期及 continuation 事件消费行为不变
+- [x] 7.1 在 REVIEW `RESEARCH_GAP` 打开 Gate 时持久化足以构造 Focused Replan 的限长 feedback/correlation 数据，打开 Gate 本身不递增 `replan_count`
+- [x] 7.2 将合法“继续研究”Gate continuation 从单纯状态回跳改为调用同一 `FocusedReplanBuilder + replan_and_transition`
+- [x] 7.3 Gate continuation 接受时重新检查 `max_replans`；已耗尽则不创建 Plan/Task并以 `REQUIRED_EVIDENCE_MISSING` 终止
+- [x] 7.4 集成测试覆盖 Gate 打开零计数、合法响应创建 Plan v+1/新 PENDING Task、重复响应幂等、stale response 失效及接受时预算耗尽
+- [x] 7.5 回归既有 REVIEW PASS/REVISE/CONFLICT/ESCALATE、Gate 取消/过期及 continuation 事件消费行为不变
 
 ## 8. 组合根、测试 doubles 与兼容性
 

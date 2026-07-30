@@ -54,6 +54,29 @@ def _open_gate(backend, clock, run, gate_type):
     return gate
 
 
+def _seed_plan(backend, clock, run, *, version: int) -> None:
+    """Persist an accepted Plan (with one research task) for the focused replan."""
+    from agents_orchestration.domain.enums import WorkerRole
+    from agents_orchestration.domain.plan import Plan, PlanGraph, TaskSpec
+
+    now = clock.now()
+    graph = PlanGraph(
+        plan_id="p1",
+        version=version,
+        task_specs=(
+            TaskSpec(
+                task_id="research-1",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gather",
+            ),
+        ),
+    )
+    plan = Plan(run_id=run.run_id, graph=graph, proposed_at=now).accept(now)
+    with backend.unit_of_work() as uow:
+        uow.plans.save(plan)
+        uow.commit()
+
+
 def _effects(backend, run_id) -> list:
     with backend.unit_of_work() as uow:
         effects = [e.effect for e in uow.events.stream(run_id)]
@@ -159,6 +182,7 @@ def test_respond_gate_escalated_fails_run(backend, fake_clock) -> None:
 @pytest.mark.integration
 def test_respond_gate_resolved_returns_reviewing_run_to_research(backend, fake_clock) -> None:
     run = _seed_run(backend, fake_clock, state=RunState.REVIEWING, plan_version=1)
+    _seed_plan(backend, fake_clock, run, version=1)  # focused replan extends it
     gate = _open_gate(backend, fake_clock, run, GateType.CONFLICT_RESOLUTION)
 
     OrchestrationService(backend).respond_gate(
@@ -172,6 +196,8 @@ def test_respond_gate_resolved_returns_reviewing_run_to_research(backend, fake_c
     with backend.unit_of_work() as uow:
         final = uow.runs.get(run.run_id)
         assert final.state is RunState.RESEARCHING
+        # 7.2: 'resolved' now consumes one shared replan budget via Focused Replan.
+        assert final.replan_count == 1
         assert uow.gates.get(gate.gate_id).state is GateState.CONSUMED
         uow.rollback()
 

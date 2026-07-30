@@ -33,8 +33,10 @@ from agents_orchestration.domain.execution import Attempt, Run, Task
 from agents_orchestration.domain.plan import PlanAcceptance
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
-from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidation
+from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
+from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidation, PlanValidator
 from agents_orchestration.orchestration.proposals import PlanProposal
+from agents_orchestration.orchestration.replan import ReplanService
 from agents_orchestration.runtime.ports import OrphanArtifactError, StaleVersionError
 from agents_orchestration.runtime.tick import RuntimeTick
 from agents_orchestration.runtime.watch import RuntimeWatch
@@ -369,7 +371,23 @@ class OrchestrationService:
             )
             consumed = responded.consume(now)
             final_run = None
+            replanned = False
             if (
+                gate.gate_type is GateType.CONFLICT_RESOLUTION
+                and validated.outcome == "resolved"
+            ):
+                # analyze-sufficiency-feedback 7.2/7.3: a "continue research"
+                # continuation runs the SAME shared Focused Replan as ANALYZE
+                # (or terminates deterministically when budget is exhausted),
+                # instead of a bare state jump back to RESEARCHING.
+                final_run, terminated = self._apply_research_gap_continuation(
+                    uow, run, validated, now
+                )
+                replanned = not terminated
+                if terminated:
+                    uow.runs.save(final_run, expected_version=original_version)
+                # the focused-replan path already CAS-saved final_run itself
+            elif (
                 gate.gate_type is GateType.PLAN_APPROVAL
                 and validated.outcome == "approved"
             ):
@@ -395,7 +413,9 @@ class OrchestrationService:
                 uow.runs.save(final_run, expected_version=original_version)
             uow.gates.save(consumed)
             uow.events.append(
-                self._gate_consumption_events(gate, consumed, validated, run, final_run, now)
+                self._gate_consumption_events(
+                    gate, consumed, validated, run, final_run, now, replanned=replanned
+                )
             )
             uow.commit()
             return consumed
@@ -454,8 +474,60 @@ class OrchestrationService:
             base = base.model_copy(update={"goal_clarification": validated.clarification})
         return base
 
+    def _apply_research_gap_continuation(
+        self, uow, run: Run, validated, now
+    ) -> tuple[Run, bool]:
+        """CONFLICT_RESOLUTION 'resolved' continuation (tasks 7.2 / 7.3).
+
+        Uses the responder's ``resolution`` as the (untrusted, length-bounded)
+        gap hint for the SAME FocusedReplanBuilder + atomic
+        ``replan_and_transition`` that ANALYZE uses. If the shared replan budget
+        is already exhausted, the Run terminates with REQUIRED_EVIDENCE_MISSING
+        and no Plan/Task is created. Returns ``(final_run, terminated)``.
+        """
+
+        gap_hint = validated.resolution or "continue research per review feedback"
+        if run.replan_count >= run.policy.max_replans:
+            return run.terminate(TerminationReason.REQUIRED_EVIDENCE_MISSING, now), True
+        builder = FocusedReplanBuilder(
+            self.capability_registry.allowed_kinds(), self.backend.idgen
+        )
+        focused = builder.build(
+            run_id=run.run_id,
+            objective=run.effective_goal,
+            approved_research_capabilities=self._approved_research_capabilities(uow, run),
+            gap_hint=gap_hint,
+        )
+        correlation = {
+            "gap_id": focused.gap.gap_id,
+            "focus_hash": focused.gap.focus_hash,
+            "source_phase": "review",
+            "source_state_version": run.state_version,
+        }
+        _plan, new_run = ReplanService(
+            uow,
+            PlanValidator(self.limits),
+            PlanAcceptor(uow, self.backend.clock, self.backend.idgen),
+            self.backend.clock,
+            self.backend.idgen,
+        ).replan_and_transition(
+            run,
+            focused.proposal,
+            transition_to=RunState.RESEARCHING,
+            correlation=correlation,
+            now=now,
+        )
+        return new_run, False
+
+    def _approved_research_capabilities(self, uow, run: Run):
+        capabilities: list = []
+        for task in uow.tasks.by_run(run.run_id, plan_version=run.current_plan_version):
+            if task.worker_role is WorkerRole.EVIDENCE_RESEARCHER:
+                capabilities.extend(task.required_capabilities)
+        return tuple(dict.fromkeys(capabilities))
+
     def _gate_consumption_events(
-        self, gate, consumed, validated, original_run, final_run, now
+        self, gate, consumed, validated, original_run, final_run, now, *, replanned: bool = False
     ) -> list[DomainEvent]:
         """Durable events for a successful Gate consumption (task 3.4 / 6)."""
 
@@ -494,7 +566,7 @@ class OrchestrationService:
                 **common,
             ),
         ]
-        if final_run.state is not original_run.state:
+        if not replanned and final_run.state is not original_run.state:
             events.append(
                 DomainEvent(
                     event_id=idgen.new_id("evt"),

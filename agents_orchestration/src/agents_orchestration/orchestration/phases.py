@@ -670,7 +670,10 @@ class ReviewPhaseHandler:
                 proposal=proposal,
                 bump_revision=True,
             )
-        if verdict is ReviewVerdict.RESEARCH_GAP:  # focused Replan if budget remains
+        if verdict is ReviewVerdict.RESEARCH_GAP:
+            # analyze-sufficiency-feedback 7.1: opening the Gate does NOT consume
+            # replan budget — the shared Focused Replan runs on continuation
+            # (resolved) and re-checks max_replans there (7.3).
             if ctx.run.replan_count >= ctx.run.policy.max_replans:
                 return PhaseOutcome(
                     AdvanceDisposition.IDLE,
@@ -683,12 +686,11 @@ class ReviewPhaseHandler:
             return PhaseOutcome(
                 AdvanceDisposition.BLOCKED,
                 next_state=None,
-                reason="review-replan",
+                reason="review-research-gap",
                 open_gate=GateType.CONFLICT_RESOLUTION,
                 stage_logical_key="review",
                 input_fingerprint=fp,
                 proposal=proposal,
-                bump_replan=True,
             )
         # CONFLICT / ESCALATE -> conflict Gate (7.7)
         return PhaseOutcome(
