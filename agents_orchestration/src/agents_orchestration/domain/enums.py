@@ -256,3 +256,27 @@ class Sufficiency(StrEnum):
     INSUFFICIENT = "insufficient"
     CONFLICTED = "conflicted"
     UNKNOWN = "unknown"
+
+
+class SufficiencyVerdict(StrEnum):
+    """Strongly-typed result of an ANALYZE sufficiency review.
+
+    L0 (structural) and L1 (semantic) funnels both emit this verdict so that
+    phase acceptance never parses a free-text reason to decide routing
+    (analyze-sufficiency-feedback Decision 2).
+    """
+
+    SUFFICIENT = "sufficient"
+    RESEARCH_GAP = "research_gap"
+    CONFLICT = "conflict"
+
+
+class ReviewSource(StrEnum):
+    """Which sufficiency funnel produced a ``SufficiencyReview``.
+
+    ``STRUCTURAL`` is the deterministic L0 branch (zero required evidence);
+    ``SEMANTIC`` is the L1 reviewer judging candidate Analysis vs. Evidence.
+    """
+
+    STRUCTURAL = "structural"
+    SEMANTIC = "semantic"

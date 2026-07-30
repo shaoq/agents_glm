@@ -1,9 +1,9 @@
 ## 1. 影响面基线与 typed contracts
 
-- [ ] 1.1 按 AGENTS.md 对 `AnalysisPhaseHandler`、`PhaseOutcome`、`ReplanService`、Review Gate continuation、生产组合根和 artifact persistence 相关 symbols 逐一运行 GitNexus upstream impact，并记录 HIGH/CRITICAL 风险后再编辑
-- [ ] 1.2 定义 `SufficiencyVerdict(SUFFICIENT, RESEARCH_GAP, CONFLICT)`、`ReviewSource(STRUCTURAL, SEMANTIC)`、`SufficiencyReview` 与允许 L0 analysis 为空的 `AnalysisSufficiencyOutcome`
-- [ ] 1.3 为 typed models 增加字段不变量：gap hint/rationale 去空白、限长，L0/L1 source、analysis、verdict、`gap_hint` 与 `focused_replan` 组合严格一致
-- [ ] 1.4 单测覆盖合法三种 verdict、空白/超长 hint、sufficient/conflict 错带 hint 及不一致 composite outcome
+- [x] 1.1 按 AGENTS.md 对 `AnalysisPhaseHandler`、`PhaseOutcome`、`ReplanService`、Review Gate continuation、生产组合根和 artifact persistence 相关 symbols 逐一运行 GitNexus upstream impact，并记录 HIGH/CRITICAL 风险后再编辑
+- [x] 1.2 定义 `SufficiencyVerdict(SUFFICIENT, RESEARCH_GAP, CONFLICT)`、`ReviewSource(STRUCTURAL, SEMANTIC)`、`SufficiencyReview` 与允许 L0 analysis 为空的 `AnalysisSufficiencyOutcome`
+- [x] 1.3 为 typed models 增加字段不变量：gap hint/rationale 去空白、限长，L0/L1 source、analysis、verdict、`gap_hint` 与 `focused_replan` 组合严格一致
+- [x] 1.4 单测覆盖合法三种 verdict、空白/超长 hint、sufficient/conflict 错带 hint 及不一致 composite outcome
 
 ## 2. gap 清洗与 FocusedReplanBuilder
 
