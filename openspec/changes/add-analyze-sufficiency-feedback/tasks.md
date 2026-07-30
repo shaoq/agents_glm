@@ -22,11 +22,11 @@
 
 ## 4. 原子 Focused Replan 接受
 
-- [ ] 4.1 扩展 Replan 接受能力，增加 `replan_and_transition`，在首次写入前完成 Task role、capability、依赖、PlanGraph、至少一个新增 PENDING Task 与 budget 校验
-- [ ] 4.2 在单个事务中保存 Plan v+1、提升的保留 Tasks、新 Tasks、依赖以及 Run 的 `RESEARCHING/current_plan_version/replan_count/state_version`
-- [ ] 4.3 在同一事务追加 `PLAN_REPLANNED` 与 `RUN_STATE_TRANSITION`，事件使用最终 Run state version 并带 gap/Plan/Task correlation payload
-- [ ] 4.4 集成测试覆盖成功时一次 Run CAS、保留已接受 Evidence、只新增 research Task、非法 proposal 零写入及 repository/CAS 故障完整回滚
-- [ ] 4.5 并发测试覆盖 provider 返回期间 Run/Plan 版本变化：候选 Analysis/Replan 只能成为 stale observation，不得创建部分 Plan 或推进 Run
+- [x] 4.1 扩展 Replan 接受能力，增加 `replan_and_transition`，在首次写入前完成 Task role、capability、依赖、PlanGraph、至少一个新增 PENDING Task 与 budget 校验
+- [x] 4.2 在单个事务中保存 Plan v+1、提升的保留 Tasks、新 Tasks、依赖以及 Run 的 `RESEARCHING/current_plan_version/replan_count/state_version`
+- [x] 4.3 在同一事务追加 `PLAN_REPLANNED` 与 `RUN_STATE_TRANSITION`，事件使用最终 Run state version 并带 gap/Plan/Task correlation payload
+- [x] 4.4 集成测试覆盖成功时一次 Run CAS、保留已接受 Evidence、只新增 research Task、非法 proposal 零写入及 repository/CAS 故障完整回滚
+- [x] 4.5 并发测试覆盖 provider 返回期间 Run/Plan 版本变化：候选 Analysis/Replan 只能成为 stale observation，不得创建部分 Plan 或推进 Run
 
 ## 5. L0/L1 reviewer 与 AnalysisPhaseHandler
 

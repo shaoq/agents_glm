@@ -4,16 +4,28 @@ focused tasks under a new Plan Version (task 5.9).
 Replan, Retry and Report revision share the Run budget and never reset the
 deadline (design Decision 10). Preserved Tasks keep their state and accepted
 result; only invalidated Tasks are SUPERSEDED.
+
+``replan_and_transition`` (analyze-sufficiency-feedback Decision 4 / tasks 4.1-4.3)
+is the atomic phase-facing entry point: it validates role/capability/dependency/
+budget invariants BEFORE the first write, then commits Plan v+1, promoted
+preserved Tasks, the new PENDING research Task(s), the Run transition to
+RESEARCHING (``current_plan_version``/``replan_count``/``state_version``), and
+the ``PLAN_REPLANNED`` + ``RUN_STATE_TRANSITION`` events in ONE transaction.
 """
 
 from __future__ import annotations
 
-from agents_orchestration.domain.enums import EffectType, TaskState, WorkerRole
+from agents_orchestration.domain.enums import EffectType, RunState, TaskState, WorkerRole
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.plan import Dependency, Plan, PlanGraph, TaskSpec
+from agents_orchestration.domain.state_machine import assert_run_transition
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
 from agents_orchestration.orchestration.proposals import ReplanProposal
+
+
+class ReplanBudgetExhausted(RuntimeError):
+    """Raised when a focused replan is requested with no replan budget left."""
 
 
 class ReplanService:
@@ -37,12 +49,130 @@ class ReplanService:
         proposal: ReplanProposal,
     ) -> tuple[Plan, Run]:
         now = self.clock.now()
+        plan, preserved_ids, invalidate, next_version, _added = self._persist_replan_graph(
+            run, proposal, now
+        )
+        new_run = run.model_copy(
+            update={
+                "current_plan_version": next_version,
+                "replan_count": run.replan_count + 1,
+                "updated_at": now,
+                "state_version": run.state_version + 1,
+            }
+        )
+        self.uow.runs.save(new_run, expected_version=run.state_version)
+        self.uow.events.append(
+            [
+                DomainEvent(
+                    event_id=self.idgen.new_id("evt"),
+                    run_id=run.run_id,
+                    effect=EffectType.PLAN_REPLANNED,
+                    state_version=new_run.state_version,
+                    occurred_at=now,
+                    plan_version=next_version,
+                    payload={
+                        "invalidated": sorted(invalidate),
+                        "added": [s.task_id for s in proposal.add_task_specs],
+                        "preserved": sorted(preserved_ids),
+                    },
+                )
+            ]
+        )
+        return plan, new_run
+
+    def replan_and_transition(
+        self,
+        run: Run,
+        proposal: ReplanProposal,
+        *,
+        transition_to: RunState,
+        correlation: dict | None = None,
+        now=None,
+    ) -> tuple[Plan, Run]:
+        """Atomic focused replan + Run state transition (tasks 4.1-4.3).
+
+        All validation (research-only roles, ≥1 new PENDING Task, remaining
+        budget, legal state transition) happens BEFORE the first repository
+        write. Plan v+1, promoted preserved Tasks, new Tasks, dependencies, the
+        Run transition (RESEARCHING + plan version + replan counter + state
+        version) and both events are committed in the caller's transaction; any
+        failure rolls back every write.
+        """
+
+        timestamp = now or self.clock.now()
+        self._require_transition(run.state, transition_to)
+        if not proposal.add_task_specs:
+            raise ValueError("focused replan must add at least one PENDING research task")
+        if run.replan_count >= run.policy.max_replans:
+            raise ReplanBudgetExhausted(
+                f"replan budget exhausted ({run.replan_count}/{run.policy.max_replans})"
+            )
+
+        plan, preserved_ids, invalidate, next_version, added_ids = self._persist_replan_graph(
+            run, proposal, timestamp
+        )
+
+        moved = run.transition(transition_to, timestamp)  # asserts legality, bumps state_version
+        new_run = moved.model_copy(
+            update={
+                "current_plan_version": next_version,
+                "replan_count": run.replan_count + 1,
+            }
+        )
+        self.uow.runs.save(new_run, expected_version=run.state_version)
+
+        payload: dict = {
+            "invalidated": sorted(invalidate),
+            "added": added_ids,
+            "preserved": sorted(preserved_ids),
+            "old_plan_version": next_version - 1,
+            "new_plan_version": next_version,
+        }
+        if correlation:
+            payload.update(correlation)
+        self.uow.events.append(
+            [
+                DomainEvent(
+                    event_id=self.idgen.new_id("evt"),
+                    run_id=run.run_id,
+                    effect=EffectType.PLAN_REPLANNED,
+                    state_version=new_run.state_version,
+                    occurred_at=timestamp,
+                    plan_version=next_version,
+                    payload=payload,
+                ),
+                DomainEvent(
+                    event_id=self.idgen.new_id("evt"),
+                    run_id=run.run_id,
+                    effect=EffectType.RUN_STATE_TRANSITION,
+                    state_version=new_run.state_version,
+                    occurred_at=timestamp,
+                    plan_version=next_version,
+                    payload={
+                        "phase": "focused_replan",
+                        "from": run.state.value,
+                        "to": transition_to.value,
+                    },
+                ),
+            ]
+        )
+        return plan, new_run
+
+    # --- shared plan persistence (no Run/event side effects) ----------------
+
+    def _persist_replan_graph(
+        self, run: Run, proposal: ReplanProposal, now
+    ) -> tuple[Plan, set[str], set[str], int, list[str]]:
+        """Promote preserved research Tasks, supersede invalidated ones, add the
+        new PENDING Tasks and commit Plan v+1. Returns the new Plan, preserved
+        ids, invalidated ids, the new version and the added task ids. Performs
+        NO Run write and emits NO event."""
+
         current = self.uow.plans.current(run.run_id)
         if current is None:
             raise ValueError(f"Run {run.run_id} has no plan to replan")
         next_version = current.version + 1
         invalidate = set(proposal.invalidate_task_ids)
-        current_tasks = self.uow.tasks.by_run(run.run_id, current.version)
 
         for spec in proposal.add_task_specs:
             if spec.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
@@ -51,6 +181,7 @@ class ReplanService:
                     f"(role {spec.worker_role.value})"
                 )
 
+        current_tasks = self.uow.tasks.by_run(run.run_id, current.version)
         preserved: list[Task] = []
         for task in current_tasks:
             if task.task_id in invalidate:
@@ -61,7 +192,6 @@ class ReplanService:
             # (remove-noop-phase-tasks 1.4); only evidence_researcher is dispatchable.
             if task.worker_role is not WorkerRole.EVIDENCE_RESEARCHER:
                 continue
-            # Promote preserved task to the new version; keep state and result.
             promoted = task.model_copy(
                 update={
                     "plan_version": next_version,
@@ -113,34 +243,14 @@ class ReplanService:
         plan = Plan(run_id=run.run_id, graph=graph, proposed_at=now).accept(now)
         self.uow.plans.save(plan)
         self.uow.plans.save(current.supersede(next_version))
+        added_ids = [s.task_id for s in proposal.add_task_specs]
+        return plan, preserved_ids, invalidate, next_version, added_ids
 
-        new_run = run.model_copy(
-            update={
-                "current_plan_version": next_version,
-                "replan_count": run.replan_count + 1,
-                "updated_at": now,
-                "state_version": run.state_version + 1,
-            }
-        )
-        self.uow.runs.save(new_run, expected_version=run.state_version)
-        self.uow.events.append(
-            [
-                DomainEvent(
-                    event_id=self.idgen.new_id("evt"),
-                    run_id=run.run_id,
-                    effect=EffectType.PLAN_REPLANNED,
-                    state_version=new_run.state_version,
-                    occurred_at=now,
-                    plan_version=next_version,
-                    payload={
-                        "invalidated": sorted(invalidate),
-                        "added": [s.task_id for s in proposal.add_task_specs],
-                        "preserved": sorted(preserved_ids),
-                    },
-                )
-            ]
-        )
-        return plan, new_run
+    @staticmethod
+    def _require_transition(current: RunState, target: RunState) -> None:
+        if target is None:
+            raise ValueError("transition_to is required for replan_and_transition")
+        assert_run_transition(current, target)
 
     @staticmethod
     def _to_spec(task: Task) -> TaskSpec:
@@ -154,3 +264,9 @@ class ReplanService:
             depth=task.depth,
             depends_on=task.depends_on,
         )
+
+
+__all__ = [
+    "ReplanBudgetExhausted",
+    "ReplanService",
+]

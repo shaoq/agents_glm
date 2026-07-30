@@ -159,8 +159,10 @@ async def test_full_research_run_goal_plan_research_finalize(service) -> None:
         final = uow.runs.get(run.run_id)
         assert final.state is RunState.SUCCEEDED
         assert final.termination is TerminationReason.COMPLETED
-        # Report artifacts persisted and content-addressed.
-        assert len(uow.artifacts.list_all()) == 3
+        # Report artifacts persisted and content-addressed, plus the
+        # ANALYZE-accepted analysis artifact (task 3.3).
+        kinds = {a.kind.value for a in uow.artifacts.list_all()}
+        assert {"report_markdown", "report_json", "run_summary", "analysis"} <= kinds
 
 
 # --- 13.3 evidence-gap Replan preserves accepted results --------------------
