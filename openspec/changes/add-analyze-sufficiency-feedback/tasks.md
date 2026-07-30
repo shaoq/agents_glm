@@ -53,17 +53,17 @@
 
 ## 8. 组合根、测试 doubles 与兼容性
 
-- [ ] 8.1 `build_production_coordinator` 增加默认 `None` 的 reviewer/artifact ports，并在函数体内统一校验为 `CompositionError`
-- [ ] 8.2 `build_production_coordinator_from_settings` 接线 `LLMEvidenceSufficiencyReviewer`、Analysis artifact store/loader 与更新后的 Replan/Gate continuation 服务
-- [ ] 8.3 `tests/support/deterministic.py` 增加可脚本化的 reviewer 和 artifact store doubles，默认 verdict 为 sufficient
-- [ ] 8.4 更新 service factory、retry/replay、composition、CLI、recovery、Gate 与 E2E fixtures，确认默认 sufficient 不改变既有成功路径
+- [x] 8.1 `build_production_coordinator` 增加默认 `None` 的 reviewer/artifact ports，并在函数体内统一校验为 `CompositionError`
+- [x] 8.2 `build_production_coordinator_from_settings` 接线 `LLMEvidenceSufficiencyReviewer`、Analysis artifact store/loader 与更新后的 Replan/Gate continuation 服务
+- [x] 8.3 `tests/support/deterministic.py` 增加可脚本化的 reviewer 和 artifact store doubles，默认 verdict 为 sufficient
+- [x] 8.4 更新 service factory、retry/replay、composition、CLI、recovery、Gate 与 E2E fixtures，确认默认 sufficient 不改变既有成功路径
 
 ## 9. 结构化观测与安全验证
 
-- [ ] 9.1 在 `PLAN_REPLANNED` payload 和 ANALYZE Stage entity IDs/refs 中记录 gap ID、source phase/state version、old/new plan version、focus hash、added/preserved tasks 与 resolved gap ID
-- [ ] 9.2 记录每轮输入 Evidence hash、新增 Evidence 数，以及 reviewer token/cost/latency，使 gap 命中率、回环通过率、零增量回环数和附加成本可计算
-- [ ] 9.3 安全测试覆盖 prompt/query injection、超长/控制字符 gap、敏感日志清理以及未注册 capability/WorkerRole/权限不能被 gap 改变
-- [ ] 9.4 观测测试确认消费者可用结构化字段关联 gap→Plan v+1→新增 Evidence→后续 sufficient，而不依赖自由文本 reason
+- [x] 9.1 在 `PLAN_REPLANNED` payload 和 ANALYZE Stage entity IDs/refs 中记录 gap ID、source phase/state version、old/new plan version、focus hash、added/preserved tasks 与 resolved gap ID
+- [x] 9.2 记录每轮输入 Evidence hash、新增 Evidence 数，以及 reviewer token/cost/latency，使 gap 命中率、回环通过率、零增量回环数和附加成本可计算
+- [x] 9.3 安全测试覆盖 prompt/query injection、超长/控制字符 gap、敏感日志清理以及未注册 capability/WorkerRole/权限不能被 gap 改变
+- [x] 9.4 观测测试确认消费者可用结构化字段关联 gap→Plan v+1→新增 Evidence→后续 sufficient，而不依赖自由文本 reason
 
 ## 10. 端到端闭环与交付验证
 

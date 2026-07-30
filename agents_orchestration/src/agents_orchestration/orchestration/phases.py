@@ -555,6 +555,7 @@ class AnalysisPhaseHandler:
                 "focus_hash": focused.gap.focus_hash,
                 "source_phase": "analyze",
                 "source_state_version": run.state_version,
+                "source_evidence_hash": suc.source_evidence_hash,
             }
             _plan, new_run = ReplanService(
                 uow,
