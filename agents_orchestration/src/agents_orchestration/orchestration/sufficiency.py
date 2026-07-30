@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from agents_orchestration.domain.enums import ReviewSource, SufficiencyVerdict
 from agents_orchestration.domain.evidence import EvidenceSet
@@ -177,10 +178,25 @@ def source_evidence_hash(evidence: EvidenceSet) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+@runtime_checkable
+class EvidenceSufficiencyReviewer(Protocol):
+    """L1 semantic reviewer: does the EvidenceSet support the candidate Analysis?
+
+    Emits a strongly-typed :class:`SufficiencyReview` (source = SEMANTIC). The
+    deterministic L0 branch never calls this port — it short-circuits zero
+    required evidence into a structural gap (task 5.3).
+    """
+
+    async def review(
+        self, run_id: str, analysis: AnalysisArtifact, evidence: EvidenceSet
+    ) -> SufficiencyReview: ...
+
+
 __all__ = [
     "GAP_HINT_MAX_LEN",
     "RATIONALE_MAX_LEN",
     "AnalysisSufficiencyOutcome",
+    "EvidenceSufficiencyReviewer",
     "FocusedReplan",
     "SanitizedGap",
     "SufficiencyReview",

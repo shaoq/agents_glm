@@ -27,9 +27,13 @@ from agents_orchestration.domain.enums import (
     EffectType,
     FailureCode,
     GateType,
+    ReviewSource,
     ReviewVerdict,
     RunState,
+    Sufficiency,
+    SufficiencyVerdict,
     TaskState,
+    TerminationReason,
     WorkerRole,
 )
 from agents_orchestration.domain.events import DomainEvent
@@ -49,6 +53,7 @@ from agents_orchestration.orchestration.proposals import (
     GoalNormalizer,
     Planner,
 )
+from agents_orchestration.orchestration.replan import ReplanService
 from agents_orchestration.orchestration.report import (
     AnalysisArtifact,
     CompletionEvaluator,
@@ -57,7 +62,12 @@ from agents_orchestration.orchestration.report import (
     ReportContent,
     ReviewProposal,
 )
-from agents_orchestration.orchestration.sufficiency import source_evidence_hash
+from agents_orchestration.orchestration.sufficiency import (
+    AnalysisSufficiencyOutcome,
+    SufficiencyReview,
+    SufficiencyValidationError,
+    source_evidence_hash,
+)
 
 
 def _fingerprint(state_version: int, plan_version: int | None = None) -> InputFingerprint:
@@ -359,24 +369,43 @@ def _simple_accept(outcome: PhaseOutcome, run: Run, uow, now) -> Run:
     return moved
 
 
-class AnalysisPhaseHandler:
-    """ANALYZING phase (tasks 7.2/7.3): drive Analyst Tasks, then produce an
-    immutable AnalysisArtifact bound to the EvidenceSet before WRITING.
+_STRUCTURAL_GAP_HINT = "No independent evidence collected for the required research."
+_STRUCTURAL_RATIONALE = "Required research produced zero independent evidence (L0)."
 
-    The accepted Analysis is materialized as a content-addressed artifact and
-    recorded on the ACCEPTED ANALYZE Stage via ``output_refs`` /
-    ``output_entities``; WRITING loads that same artifact instead of re-invoking
-    the analyst (analyze-sufficiency-feedback Decision 5 / task 3.3).
+
+class AnalysisPhaseHandler:
+    """ANALYZING phase (analyze-sufficiency-feedback 5.3-5.5).
+
+    L0: a required EvidenceSet with zero independent evidence (``INSUFFICIENT``)
+    short-circuits to a structural ``research_gap`` WITHOUT calling the analyst
+    or reviewer. Otherwise the analyst produces a candidate Analysis and the L1
+    reviewer judges whether the evidence supports it. ``sufficient`` /
+    ``conflict`` materialize the candidate as the authoritative artifact and
+    enter WRITING; ``research_gap`` raises a plan-scoped Focused Replan (or
+    terminates deterministically when the replan budget is exhausted). Provider
+    failures degrade to a non-immediately-retryable IDLE.
     """
 
     phase = PhaseId.ANALYZE
 
     def __init__(
-        self, analyst: Analyst, evidence_provider, artifact_store, *, clock, idgen
+        self,
+        analyst: Analyst,
+        evidence_provider,
+        artifact_store,
+        sufficiency_reviewer,
+        focused_replan_builder,
+        validator: PlanValidator,
+        *,
+        clock,
+        idgen,
     ) -> None:
         self.analyst = analyst
         self.evidence_provider = evidence_provider
         self.artifact_store = artifact_store
+        self.sufficiency_reviewer = sufficiency_reviewer
+        self.focused_replan_builder = focused_replan_builder
+        self.validator = validator
         self.clock = clock
         self.idgen = idgen
 
@@ -384,33 +413,166 @@ class AnalysisPhaseHandler:
         fp = _fingerprint(ctx.run.state_version, ctx.run.current_plan_version)
         try:
             evidence = await self.evidence_provider(ctx.run.run_id)
+        except Exception as exc:  # evidence provider failure -> degrade (5.5)
+            return self._idle(fp, f"analyze-evidence-failed:{type(exc).__name__}")
+        ev_hash = source_evidence_hash(evidence)
+
+        # L0: zero independent required evidence -> structural gap, no model call.
+        if evidence.sufficiency is Sufficiency.INSUFFICIENT:
+            return self._gap_outcome(
+                ctx, backend, fp, ev_hash, analysis=None, source=ReviewSource.STRUCTURAL
+            )
+
+        try:
             analysis = await self.analyst(ctx.run.run_id, evidence)
+            review = await self.sufficiency_reviewer.review(ctx.run.run_id, analysis, evidence)
+        except SufficiencyValidationError as exc:  # invalid reviewer structure (5.6)
+            return self._idle(fp, f"analyze-invalid-review:{exc}")
+        except Exception as exc:  # analyst/reviewer failure -> degrade (5.5)
+            return self._idle(fp, f"analyze-provider-failed:{type(exc).__name__}")
+
+        if review.verdict in (SufficiencyVerdict.SUFFICIENT, SufficiencyVerdict.CONFLICT):
+            return await self._accept_outcome(ctx, fp, ev_hash, analysis, review)
+        # semantic research_gap
+        return self._gap_outcome(
+            ctx,
+            backend,
+            fp,
+            ev_hash,
+            analysis=analysis,
+            source=ReviewSource.SEMANTIC,
+            gap_hint=review.gap_hint,
+            rationale=review.rationale,
+        )
+
+    async def _accept_outcome(self, ctx, fp, ev_hash, analysis, review) -> PhaseOutcome:
+        try:
             ref = await self.artifact_store.materialize(
                 run_id=ctx.run.run_id,
                 plan_version=ctx.run.current_plan_version or 0,
                 analysis=analysis,
-                source_evidence_hash=source_evidence_hash(evidence),
+                source_evidence_hash=ev_hash,
             )
-        except Exception as exc:  # provider failure -> degrade
-            return PhaseOutcome(
-                disposition=AdvanceDisposition.IDLE,
-                reason=f"analyze-provider-failed:{type(exc).__name__}",
-                failure_code=FailureCode.UPSTREAM_ERROR,
-                stage_logical_key="analyze",
-                input_fingerprint=fp,
-            )
+        except Exception as exc:  # artifact store failure -> degrade (5.5)
+            return self._idle(fp, f"analyze-artifact-failed:{type(exc).__name__}")
+        outcome = AnalysisSufficiencyOutcome(
+            review=review, source_evidence_hash=ev_hash, analysis=analysis
+        )
         return PhaseOutcome(
             disposition=AdvanceDisposition.PROGRESSED,
             next_state=RunState.WRITING,
-            reason="analyzed",
+            reason=f"analyze-{review.verdict.value}",
             stage_logical_key="analyze",
             input_fingerprint=fp,
-            proposal=analysis,
+            proposal=outcome,
             output_refs=(ref.as_artifact_ref(),),
             output_entities=(ref.artifact_id,),
         )
 
-    accept = staticmethod(_simple_accept)
+    def _gap_outcome(
+        self, ctx, backend, fp, ev_hash, *, analysis, source, gap_hint=None, rationale=None
+    ) -> PhaseOutcome:
+        hint = gap_hint if gap_hint is not None else _STRUCTURAL_GAP_HINT
+        reason_text = rationale or (
+            _STRUCTURAL_RATIONALE
+            if source is ReviewSource.STRUCTURAL
+            else "reviewer-flagged research gap"
+        )
+        review = SufficiencyReview(
+            verdict=SufficiencyVerdict.RESEARCH_GAP,
+            source=source,
+            rationale=reason_text,
+            gap_hint=hint,
+        )
+        if ctx.run.replan_count >= ctx.run.policy.max_replans:
+            outcome = AnalysisSufficiencyOutcome(
+                review=review, source_evidence_hash=ev_hash, analysis=analysis
+            )
+            return PhaseOutcome(
+                disposition=AdvanceDisposition.PROGRESSED,
+                reason="analyze-gap-exhausted",
+                stage_logical_key="analyze",
+                input_fingerprint=fp,
+                proposal=outcome,
+                termination_reason=TerminationReason.REQUIRED_EVIDENCE_MISSING,
+            )
+        focused = self._build_focused_replan(ctx, backend, hint)
+        outcome = AnalysisSufficiencyOutcome(
+            review=review,
+            source_evidence_hash=ev_hash,
+            analysis=analysis,
+            focused_replan=focused,
+        )
+        return PhaseOutcome(
+            disposition=AdvanceDisposition.PROGRESSED,
+            next_state=None,
+            reason="analyze-research-gap",
+            stage_logical_key="analyze",
+            input_fingerprint=fp,
+            proposal=outcome,
+            handled_accept=True,
+            continue_immediately=True,
+        )
+
+    def _build_focused_replan(self, ctx, backend, gap_hint):
+        approved = self._approved_research_capabilities(ctx, backend)
+        return self.focused_replan_builder.build(
+            run_id=ctx.run.run_id,
+            objective=ctx.run.effective_goal,
+            approved_research_capabilities=approved,
+            gap_hint=gap_hint,
+        )
+
+    def _approved_research_capabilities(self, ctx, backend) -> tuple[CapabilityKind, ...]:
+        with backend.unit_of_work() as uow:
+            tasks = [
+                t
+                for t in uow.tasks.by_run(ctx.run.run_id, plan_version=ctx.run.current_plan_version)
+                if t.worker_role is WorkerRole.EVIDENCE_RESEARCHER
+            ]
+            uow.commit()
+        caps: list[CapabilityKind] = []
+        for t in tasks:
+            caps.extend(t.required_capabilities)
+        return tuple(dict.fromkeys(caps))
+
+    def _idle(self, fp, reason: str) -> PhaseOutcome:
+        return PhaseOutcome(
+            disposition=AdvanceDisposition.IDLE,
+            reason=reason,
+            failure_code=FailureCode.UPSTREAM_ERROR,
+            stage_logical_key="analyze",
+            input_fingerprint=fp,
+            continue_immediately=False,
+        )
+
+    def accept(self, outcome: PhaseOutcome, run: Run, uow, now: datetime) -> Run:
+        suc: AnalysisSufficiencyOutcome = outcome.proposal  # type: ignore[assignment]
+        if suc.is_gap and suc.focused_replan is not None:
+            focused = suc.focused_replan
+            correlation = {
+                "gap_id": focused.gap.gap_id,
+                "focus_hash": focused.gap.focus_hash,
+                "source_phase": "analyze",
+                "source_state_version": run.state_version,
+            }
+            _plan, new_run = ReplanService(
+                uow,
+                self.validator,
+                PlanAcceptor(uow, self.clock, self.idgen),
+                self.clock,
+                self.idgen,
+            ).replan_and_transition(
+                run,
+                focused.proposal,
+                transition_to=RunState.RESEARCHING,
+                correlation=correlation,
+                now=now,
+            )
+            return new_run
+        # sufficient/conflict: persist the transition to WRITING (the coordinator
+        # records the accepted artifact stage via outcome.output_refs).
+        return _simple_accept(outcome, run, uow, now)
 
 
 class WritingPhaseHandler:

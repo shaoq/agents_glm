@@ -9,7 +9,13 @@ fake assembly.
 
 from __future__ import annotations
 
-from agents_orchestration.domain.enums import CapabilityKind, ReviewVerdict, WorkerRole
+from agents_orchestration.domain.enums import (
+    CapabilityKind,
+    ReviewSource,
+    ReviewVerdict,
+    SufficiencyVerdict,
+    WorkerRole,
+)
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.goal import (
     CompletionContract,
@@ -21,6 +27,7 @@ from agents_orchestration.domain.plan import TaskSpec
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.orchestration.composition import build_production_coordinator
 from agents_orchestration.orchestration.coordinator import RunCoordinator
+from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
 from agents_orchestration.orchestration.proposals import (
     GoalNormalizationOutcome,
     PlanProposal,
@@ -30,6 +37,7 @@ from agents_orchestration.orchestration.report import (
     ReportContent,
     ReviewProposal,
 )
+from agents_orchestration.orchestration.sufficiency import SufficiencyReview
 from agents_orchestration.runtime.tick import TaskExecutionOutcome
 
 _DELIVERABLE = "report.md"
@@ -100,6 +108,32 @@ class FakeReviewer:
         return ReviewProposal(verdict=ReviewVerdict.PASS, reason="ok")
 
 
+class FakeSufficiencyReviewer:
+    """Deterministic L1 sufficiency reviewer (task 8.3).
+
+    Defaults to ``SUFFICIENT`` so the happy path proceeds to WRITING. Scriptable
+    per-instance so gap/conflict tests can drive the ANALYZE funnel."""
+
+    def __init__(
+        self,
+        verdict: SufficiencyVerdict = SufficiencyVerdict.SUFFICIENT,
+        *,
+        gap_hint: str | None = None,
+        rationale: str = "evidence supports conclusions",
+    ) -> None:
+        self.verdict = verdict
+        self.gap_hint = gap_hint
+        self.rationale = rationale
+
+    async def review(self, run_id: str, analysis, evidence) -> SufficiencyReview:
+        return SufficiencyReview(
+            verdict=self.verdict,
+            source=ReviewSource.SEMANTIC,
+            rationale=self.rationale,
+            gap_hint=self.gap_hint,
+        )
+
+
 async def research_evidence(run_id: str):
     """Raw accepted Evidence tuple for the Research Join."""
 
@@ -143,6 +177,7 @@ def build_deterministic_coordinator(backend) -> RunCoordinator:
     artifact_store = SqliteAnalysisArtifactStore(
         SqliteArtifactStore(backend.conn, backend.artifact_dir)
     )
+    focused_replan_builder = FocusedReplanBuilder(frozenset(CapabilityKind), backend.idgen)
 
     async def accepted_analysis_provider(run_id: str) -> AnalysisArtifact:
         with backend.unit_of_work() as uow:
@@ -173,5 +208,7 @@ def build_deterministic_coordinator(backend) -> RunCoordinator:
         deliverables_provider=deliverables_provider,
         allowed_capabilities=frozenset(CapabilityKind),
         analysis_artifact_store=artifact_store,
+        sufficiency_reviewer=FakeSufficiencyReviewer(),
+        focused_replan_builder=focused_replan_builder,
         limits=SystemLimits(),
     )

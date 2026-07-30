@@ -13,7 +13,7 @@ from agents_orchestration.domain.coordination import (
     StageExecution,
     StageStatus,
 )
-from agents_orchestration.domain.enums import RunState
+from agents_orchestration.domain.enums import CapabilityKind, RunState
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
@@ -23,16 +23,27 @@ from agents_orchestration.orchestration.analysis_artifact import (
     accepted_analysis_ref,
 )
 from agents_orchestration.orchestration.coordinator import RunCoordinator
+from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
 from agents_orchestration.orchestration.phases import AnalysisPhaseHandler, WritingPhaseHandler
+from agents_orchestration.orchestration.planner import PlanValidator
 from agents_orchestration.orchestration.report import AnalysisArtifact, ReportContent
 from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
 from agents_orchestration.runtime.ports import OrphanArtifactError
+from tests.support.deterministic import FakeSufficiencyReviewer
 
 _NOW = datetime(2026, 7, 27, tzinfo=UTC)
 
 
 def _store(backend) -> SqliteAnalysisArtifactStore:
     return SqliteAnalysisArtifactStore(SqliteArtifactStore(backend.conn, backend.artifact_dir))
+
+
+def _sufficient_reviewer() -> FakeSufficiencyReviewer:
+    return FakeSufficiencyReviewer()
+
+
+def _focused_replan_builder(backend) -> FocusedReplanBuilder:
+    return FocusedReplanBuilder(frozenset(CapabilityKind), backend.idgen)
 
 
 def _analysis(run_id: str = "r1") -> AnalysisArtifact:
@@ -225,7 +236,14 @@ async def test_writer_consumes_same_artifact_as_accepted_stage(backend) -> None:
         return EvidenceSet.join(run_id=run_id, task_id="research", evidences=(), required=False)
 
     analyze_handler = AnalysisPhaseHandler(
-        analyst, evidence, store, clock=backend.clock, idgen=backend.idgen
+        analyst,
+        evidence,
+        store,
+        _sufficient_reviewer(),
+        _focused_replan_builder(backend),
+        PlanValidator(SystemLimits()),
+        clock=backend.clock,
+        idgen=backend.idgen,
     )
     report = await RunCoordinator(backend, {PhaseId.ANALYZE: analyze_handler}).advance(run.run_id)
     assert report.to_state is RunState.WRITING

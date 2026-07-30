@@ -75,7 +75,9 @@ def _coordinator_with_executor(backend, executor) -> RunCoordinator:
     from agents_orchestration.orchestration.analysis_artifact import (
         SqliteAnalysisArtifactStore,
     )
+    from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
     from agents_orchestration.runtime.persistence.artifact_store import SqliteArtifactStore
+    from tests.support.deterministic import FakeSufficiencyReviewer
 
     limits = SystemLimits()
     artifact_store = SqliteAnalysisArtifactStore(
@@ -96,6 +98,8 @@ def _coordinator_with_executor(backend, executor) -> RunCoordinator:
         deliverables_provider=deliverables_provider,
         allowed_capabilities=frozenset(CapabilityKind),
         analysis_artifact_store=artifact_store,
+        sufficiency_reviewer=FakeSufficiencyReviewer(),
+        focused_replan_builder=FocusedReplanBuilder(frozenset(CapabilityKind), backend.idgen),
         limits=limits,
     )
 

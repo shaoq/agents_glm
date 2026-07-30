@@ -14,6 +14,7 @@ from __future__ import annotations
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.orchestration.coordinator import RunCoordinator
+from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
 from agents_orchestration.orchestration.phases import (
     AnalysisPhaseHandler,
     FinalizePhaseHandler,
@@ -23,6 +24,7 @@ from agents_orchestration.orchestration.phases import (
     ReviewPhaseHandler,
     WritingPhaseHandler,
 )
+from agents_orchestration.orchestration.planner import PlanValidator
 from agents_orchestration.runtime.tick import RuntimeTick
 
 _DELIVERABLE = "report.md"
@@ -48,6 +50,8 @@ def build_production_coordinator(
     deliverables_provider,
     allowed_capabilities,
     analysis_artifact_store=None,
+    sufficiency_reviewer=None,
+    focused_replan_builder=None,
     limits: SystemLimits | None = None,
     approval_required: bool = False,
 ) -> RunCoordinator:
@@ -79,6 +83,8 @@ def build_production_coordinator(
         "report_provider": report_provider,
         "deliverables_provider": deliverables_provider,
         "analysis_artifact_store": analysis_artifact_store,
+        "sufficiency_reviewer": sufficiency_reviewer,
+        "focused_replan_builder": focused_replan_builder,
     }
     missing = sorted(name for name, port in ports.items() if port is None)
     if missing:
@@ -107,6 +113,9 @@ def build_production_coordinator(
             analyst,
             evidence_set,
             analysis_artifact_store,
+            sufficiency_reviewer,
+            focused_replan_builder,
+            PlanValidator(sys_limits),
             clock=backend.clock,
             idgen=backend.idgen,
         ),
@@ -165,6 +174,7 @@ def build_production_coordinator_from_settings(
     from agents_orchestration.domain.enums import WorkerRole
     from agents_orchestration.orchestration.llm_ports import (
         LLMAnalyst,
+        LLMEvidenceSufficiencyReviewer,
         LLMGoalNormalizer,
         LLMPlanner,
         LLMReportReviewer,
@@ -189,6 +199,7 @@ def build_production_coordinator_from_settings(
     analyst = LLMAnalyst(adapter, idgen)
     writer = LLMReportWriter(adapter, idgen)
     reviewer = LLMReportReviewer(adapter, idgen)
+    sufficiency_reviewer = LLMEvidenceSufficiencyReviewer(adapter, idgen)
 
     # capability_registry is the sibling-adapter injection seam. Production does
     # not register real Memory/RAG/Web adapters yet (deferred); tests inject fake
@@ -201,6 +212,7 @@ def build_production_coordinator_from_settings(
     )
 
     research_handler = MultiSourceResearchHandler(registry, idgen)
+    focused_replan_builder = FocusedReplanBuilder(registry.allowed_kinds(), idgen)
     handlers = {
         WorkerRole.EVIDENCE_RESEARCHER: research_handler,
     }
@@ -264,6 +276,8 @@ def build_production_coordinator_from_settings(
         deliverables_provider=deliverables_provider,
         allowed_capabilities=registry.allowed_kinds(),
         analysis_artifact_store=analysis_artifact_store,
+        sufficiency_reviewer=sufficiency_reviewer,
+        focused_replan_builder=focused_replan_builder,
         limits=limits,
     )
 

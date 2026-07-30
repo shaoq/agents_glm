@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from agents_orchestration.domain.coordination import AdvanceDisposition, PhaseId
-from agents_orchestration.domain.enums import RunState
+from agents_orchestration.domain.enums import CapabilityKind, RunState
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.goal import (
@@ -45,6 +45,23 @@ def _analysis_store(backend) -> SqliteAnalysisArtifactStore:
     return SqliteAnalysisArtifactStore(SqliteArtifactStore(backend.conn, backend.artifact_dir))
 
 
+def _analysis_handler(backend, analyst, reviewer=None):
+    from agents_orchestration.orchestration.focused_replan import FocusedReplanBuilder
+    from agents_orchestration.orchestration.planner import PlanValidator
+    from tests.support.deterministic import FakeSufficiencyReviewer
+
+    return AnalysisPhaseHandler(
+        analyst,
+        _evidence,
+        _analysis_store(backend),
+        reviewer or FakeSufficiencyReviewer(),
+        FocusedReplanBuilder(frozenset(CapabilityKind), backend.idgen),
+        PlanValidator(SystemLimits()),
+        clock=backend.clock,
+        idgen=backend.idgen,
+    )
+
+
 def _seed_run(backend, state: RunState, plan_version: int = 1) -> Run:
     run = Run(
         run_id=backend.idgen.new_id("run"),
@@ -75,9 +92,7 @@ async def test_analysis_produces_artifact_to_writing(backend) -> None:
     async def analyst(run_id, evidence):
         return AnalysisArtifact(run_id=run_id, conclusions=("c1",))
 
-    handler = AnalysisPhaseHandler(
-        analyst, _evidence, _analysis_store(backend), clock=backend.clock, idgen=backend.idgen
-    )
+    handler = _analysis_handler(backend, analyst)
     report = await RunCoordinator(backend, {PhaseId.ANALYZE: handler}).advance(run.run_id)
     assert report.disposition is AdvanceDisposition.PROGRESSED
     assert report.to_state is RunState.WRITING
@@ -93,13 +108,7 @@ async def test_analysis_provider_failure_degrades_to_idle(backend) -> None:
     async def failing_analyst(run_id, evidence):
         raise RuntimeError("analyst down")
 
-    handler = AnalysisPhaseHandler(
-        failing_analyst,
-        _evidence,
-        _analysis_store(backend),
-        clock=backend.clock,
-        idgen=backend.idgen,
-    )
+    handler = _analysis_handler(backend, failing_analyst)
     report = await RunCoordinator(backend, {PhaseId.ANALYZE: handler}).advance(run.run_id)
     assert report.disposition is AdvanceDisposition.IDLE
     assert "analyze-provider-failed" in report.reason

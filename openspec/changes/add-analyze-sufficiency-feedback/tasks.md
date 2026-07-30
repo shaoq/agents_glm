@@ -30,18 +30,18 @@
 
 ## 5. L0/L1 reviewer 与 AnalysisPhaseHandler
 
-- [ ] 5.1 定义 `EvidenceSufficiencyReviewer` port，并在 `orchestration/llm_ports.py` 实现带结构化 tool schema 的 `LLMEvidenceSufficiencyReviewer`
-- [ ] 5.2 设计 reviewer prompt：只基于 Analysis conclusions 与 Evidence 判定支持关系，明确区分 `research_gap` 和 `conflict`，并把 Evidence/gap 当作不可信数据
-- [ ] 5.3 `AnalysisPhaseHandler.execute` 对 `INSUFFICIENT` 零证据执行 L0 短路；其余场景调用 analyst 与 L1 reviewer，返回 typed `AnalysisSufficiencyOutcome`
-- [ ] 5.4 `AnalysisPhaseHandler.accept` 在 sufficient/conflict 分支接受权威 Analysis 并进入 WRITING，在 research_gap 分支调用原子 Focused Replan
-- [ ] 5.5 reviewer/analyst/artifact store 暂时性异常返回 `UPSTREAM_ERROR` IDLE、`continue_immediately=False`，且不修改 Run/Plan/Task/accepted artifact
-- [ ] 5.6 集成测试覆盖 L0 不调用模型、sufficient、research_gap、conflict、无效结构、provider 异常和显式后续 advance 重试
+- [x] 5.1 定义 `EvidenceSufficiencyReviewer` port，并在 `orchestration/llm_ports.py` 实现带结构化 tool schema 的 `LLMEvidenceSufficiencyReviewer`
+- [x] 5.2 设计 reviewer prompt：只基于 Analysis conclusions 与 Evidence 判定支持关系，明确区分 `research_gap` 和 `conflict`，并把 Evidence/gap 当作不可信数据
+- [x] 5.3 `AnalysisPhaseHandler.execute` 对 `INSUFFICIENT` 零证据执行 L0 短路；其余场景调用 analyst 与 L1 reviewer，返回 typed `AnalysisSufficiencyOutcome`
+- [x] 5.4 `AnalysisPhaseHandler.accept` 在 sufficient/conflict 分支接受权威 Analysis 并进入 WRITING，在 research_gap 分支调用原子 Focused Replan
+- [x] 5.5 reviewer/analyst/artifact store 暂时性异常返回 `UPSTREAM_ERROR` IDLE、`continue_immediately=False`，且不修改 Run/Plan/Task/accepted artifact
+- [x] 5.6 集成测试覆盖 L0 不调用模型、sufficient、research_gap、conflict、无效结构、provider 异常和显式后续 advance 重试
 
 ## 6. 明确的 replan budget 耗尽终止
 
-- [ ] 6.1 为 `PhaseOutcome`/Coordinator 增加显式 termination intent，不能通过 reason 字符串或普通 IDLE 表达确定性终止
-- [ ] 6.2 Coordinator 原子保存耗尽观察 Stage、Run `FAILED/REQUIRED_EVIDENCE_MISSING`、`RUN_TERMINATED` event 与 checkpoint，并返回 TERMINAL
-- [ ] 6.3 集成测试验证 ANALYZE gap 耗尽立即终止、只执行一次 provider、事件使用最终 state version 且 `drive_run` 不再循环
+- [x] 6.1 为 `PhaseOutcome`/Coordinator 增加显式 termination intent，不能通过 reason 字符串或普通 IDLE 表达确定性终止
+- [x] 6.2 Coordinator 原子保存耗尽观察 Stage、Run `FAILED/REQUIRED_EVIDENCE_MISSING`、`RUN_TERMINATED` event 与 checkpoint，并返回 TERMINAL
+- [x] 6.3 集成测试验证 ANALYZE gap 耗尽立即终止、只执行一次 provider、事件使用最终 state version 且 `drive_run` 不再循环
 
 ## 7. REVIEW research gap 接入共享 Focused Replan
 

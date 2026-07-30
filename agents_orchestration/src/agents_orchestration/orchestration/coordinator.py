@@ -98,6 +98,11 @@ class PhaseOutcome:
     bump_replan: bool = False
     counts_toward_idle_budget: bool = True
     continue_immediately: bool = True
+    # analyze-sufficiency-feedback 5.4/6.1: explicit phase signals consumed by
+    # the coordinator's deterministic accept branches — never inferred from
+    # ``reason`` text.
+    handled_accept: bool = False
+    termination_reason: TerminationReason | None = None
 
 
 class PhaseHandler(Protocol):
@@ -265,21 +270,32 @@ class RunCoordinator:
                 counts_toward_idle_budget=outcome.counts_toward_idle_budget,
             )
         # PROGRESSED: handler.accept does phase-specific persistence.
+        if outcome.termination_reason is not None:
+            # 6.1/6.2: explicit deterministic termination (e.g. gap budget
+            # exhausted) — terminate atomically and return TERMINAL, never a
+            # plain IDLE that would re-invoke the provider.
+            return self._accept_terminal(current, phase, outcome, now)
         with self.backend.unit_of_work() as uow:
             new_run = self.handlers[phase].accept(outcome, current, uow, now)
-            if new_run.state is not current.state:
-                uow.events.append(
-                    [
-                        self._event(
-                            new_run,
-                            EffectType.RUN_STATE_TRANSITION,
-                            now,
-                            payload={"phase": phase.value},
-                        )
-                    ]
-                )
-            if outcome.input_fingerprint is not None:
-                self._persist_accepted_stage(uow, current, phase, outcome, now)
+            if outcome.handled_accept:
+                # The handler performed the full atomic accept itself (e.g. the
+                # ANALYZE focused replan already transitioned the Run and emitted
+                # PLAN_REPLANNED + RUN_STATE_TRANSITION); only record the checkpoint.
+                pass
+            else:
+                if new_run.state is not current.state:
+                    uow.events.append(
+                        [
+                            self._event(
+                                new_run,
+                                EffectType.RUN_STATE_TRANSITION,
+                                now,
+                                payload={"phase": phase.value},
+                            )
+                        ]
+                    )
+                if outcome.input_fingerprint is not None:
+                    self._persist_accepted_stage(uow, current, phase, outcome, now)
             uow.checkpoints.save(
                 self._checkpoint(
                     new_run,
@@ -300,6 +316,31 @@ class RunCoordinator:
             task_tick=outcome.task_tick,
             continue_immediately=outcome.continue_immediately,
         )
+
+    def _accept_terminal(self, run, phase, outcome, now):
+        """Atomic deterministic termination from a phase outcome (task 6.2).
+
+        Records the observing Stage, the terminal Run (FAILED + reason), the
+        RUN_TERMINATED event and a checkpoint in one transaction, then returns
+        TERMINAL. Used for ANALYZE research-gap budget exhaustion
+        (REQUIRED_EVIDENCE_MISSING)."""
+
+        reason = outcome.termination_reason
+        moved = run.terminate(reason, now)
+        with self.backend.unit_of_work() as uow:
+            uow.runs.save(moved, expected_version=run.state_version)
+            if outcome.input_fingerprint is not None:
+                self._persist_observation_stage(uow, run, phase, outcome, now)
+            uow.events.append(
+                [self._event(moved, EffectType.RUN_TERMINATED, now, kind=reason.value)]
+            )
+            uow.checkpoints.save(
+                self._checkpoint(
+                    moved, CheckpointKind.FINALIZATION, f"terminate:{reason.value}", now
+                )
+            )
+            uow.commit()
+        return self._report(moved, moved.state, AdvanceDisposition.TERMINAL, reason=reason.value)
 
     def _accept_blocked(self, run, phase, outcome, now):
         with self.backend.unit_of_work() as uow:
