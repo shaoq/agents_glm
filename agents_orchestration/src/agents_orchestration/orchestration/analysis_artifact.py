@@ -91,7 +91,6 @@ class SqliteAnalysisArtifactStore:
     ) -> AnalysisArtifactRef:
         content = analysis.model_dump_json().encode("utf-8")
         ref = self.store.write(content, kind=ArtifactKind.ANALYSIS)
-        self.store.record_metadata(ref)
         return AnalysisArtifactRef(
             artifact_id=ref.artifact_id,
             content_hash=ref.content_hash,
@@ -124,14 +123,21 @@ def accepted_analysis_ref(stages, run_id: str, plan_version: int) -> AnalysisArt
         if not stage.output_artifact_refs:
             continue
         blob = stage.output_artifact_refs[0]
+        evidence_prefix = "source_evidence_hash:"
+        evidence_hash = next(
+            (
+                entity[len(evidence_prefix) :]
+                for entity in stage.output_entity_ids
+                if entity.startswith(evidence_prefix)
+            ),
+            "",
+        )
         return AnalysisArtifactRef(
             artifact_id=blob.artifact_id,
             content_hash=blob.content_hash,
             run_id=run_id,
             plan_version=plan_version,
-            # The persisted authority carries only the blob ref; the source
-            # evidence hash is an observability field carried by the outcome.
-            source_evidence_hash="",
+            source_evidence_hash=evidence_hash,
             path=blob.path,
             size_bytes=blob.size_bytes,
         )

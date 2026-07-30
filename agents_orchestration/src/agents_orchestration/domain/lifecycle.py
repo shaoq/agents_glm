@@ -29,6 +29,12 @@ class LeaseState(StrEnum):
         return self in {LeaseState.CLAIMED, LeaseState.RENEWED}
 
 
+class GateContinuationIntent(StrEnum):
+    """Typed semantic intent carried by a persisted Gate continuation."""
+
+    REVIEW_RESEARCH_GAP = "review_research_gap"
+
+
 class Lease(BaseModel):
     """An execution claim on a Task for one Attempt."""
 
@@ -79,6 +85,9 @@ class GateContinuation(BaseModel):
     bound_plan_version: int | None = None
     bound_contract_version: int | None = None
     bound_artifact_hash: str | None = None
+    intent: GateContinuationIntent | None = None
+    feedback: str | None = Field(default=None, max_length=500)
+    correlation_id: str | None = None
     # Tuple of (outcome, next_state) — immutable and JSON-serializable, so the
     # continuation cannot be tampered with after construction and still persists
     # in the Gate's data blob (unlike a mutable dict or MappingProxyType).

@@ -57,7 +57,11 @@ from agents_orchestration.domain.enums import (
 )
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run
-from agents_orchestration.domain.lifecycle import Checkpoint, CheckpointKind
+from agents_orchestration.domain.lifecycle import (
+    Checkpoint,
+    CheckpointKind,
+    GateContinuationIntent,
+)
 from agents_orchestration.domain.state_machine import assert_run_transition
 
 if TYPE_CHECKING:
@@ -92,6 +96,9 @@ class PhaseOutcome:
     output_entities: tuple[str, ...] = ()
     task_tick: TaskTickSummary | None = None
     open_gate: GateType | None = None
+    gate_intent: GateContinuationIntent | None = None
+    gate_feedback: str | None = None
+    gate_correlation_id: str | None = None
     failure_code: FailureCode | None = None
     proposal: object | None = None
     bump_revision: bool = False
@@ -280,7 +287,7 @@ class RunCoordinator:
             if outcome.handled_accept:
                 # The handler performed the full atomic accept itself (e.g. the
                 # ANALYZE focused replan already transitioned the Run and emitted
-                # PLAN_REPLANNED + RUN_STATE_TRANSITION); only record the checkpoint.
+                # PLAN_REPLANNED + RUN_STATE_TRANSITION).
                 pass
             else:
                 if new_run.state is not current.state:
@@ -294,8 +301,11 @@ class RunCoordinator:
                             )
                         ]
                     )
-                if outcome.input_fingerprint is not None:
-                    self._persist_accepted_stage(uow, current, phase, outcome, now)
+            # A handler-owned transition does not imply handler-owned Stage
+            # persistence. Every accepted phase result keeps its structured
+            # observation under the captured pre-transition fingerprint.
+            if outcome.input_fingerprint is not None:
+                self._persist_accepted_stage(uow, current, phase, outcome, now)
             uow.checkpoints.save(
                 self._checkpoint(
                     new_run,
@@ -426,7 +436,13 @@ class RunCoordinator:
     def _open_gate(self, uow, run, outcome) -> None:
         from agents_orchestration.orchestration.gates import GateService
 
-        cont = build_gate_continuation(outcome.open_gate, run)
+        cont = build_gate_continuation(
+            outcome.open_gate,
+            run,
+            intent=outcome.gate_intent,
+            feedback=outcome.gate_feedback,
+            correlation_id=outcome.gate_correlation_id,
+        )
         GateService(uow, self.backend.clock, self.backend.idgen).open(
             run,
             outcome.open_gate,
@@ -440,14 +456,23 @@ class RunCoordinator:
 
     def _persist_accepted_stage(self, uow, run, phase, outcome, now) -> None:
         stage = self._build_stage(run, phase, outcome, StageStatus.PREPARED, now)
-        uow.stages.prepare(stage)
-        accepted = stage.transition(
+        prepared = uow.stages.prepare(stage)
+        if prepared.status is StageStatus.ACCEPTED:
+            return
+        # Candidate artifacts are filesystem-only until this accepted-stage
+        # transaction makes them authoritative. A stale/CAS-losing candidate
+        # therefore remains a reclaimable orphan with no metadata visibility.
+        for ref in outcome.output_refs:
+            uow.artifacts.record_metadata(ref)
+        accepted = prepared.transition(
             StageStatus.ACCEPTED,
             at=now,
             output_artifact_refs=tuple(outcome.output_refs),
             output_entity_ids=tuple(outcome.output_entities),
+            failure_code=None,
+            counts_toward_idle_budget=False,
         )
-        uow.stages.accept(stage.stage_execution_id, accepted=accepted)
+        uow.stages.accept(prepared.stage_execution_id, accepted=accepted)
 
     def _persist_observation_stage(self, uow, run, phase, outcome, now) -> None:
         uow.stages.save(self._build_stage(run, phase, outcome, StageStatus.PREPARED, now))

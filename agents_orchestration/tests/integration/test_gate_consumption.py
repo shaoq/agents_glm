@@ -180,9 +180,11 @@ def test_respond_gate_escalated_fails_run(backend, fake_clock) -> None:
 
 
 @pytest.mark.integration
-def test_respond_gate_resolved_returns_reviewing_run_to_research(backend, fake_clock) -> None:
+def test_generic_conflict_resolution_does_not_create_focused_replan(
+    backend, fake_clock
+) -> None:
     run = _seed_run(backend, fake_clock, state=RunState.REVIEWING, plan_version=1)
-    _seed_plan(backend, fake_clock, run, version=1)  # focused replan extends it
+    _seed_plan(backend, fake_clock, run, version=1)
     gate = _open_gate(backend, fake_clock, run, GateType.CONFLICT_RESOLUTION)
 
     OrchestrationService(backend).respond_gate(
@@ -196,8 +198,12 @@ def test_respond_gate_resolved_returns_reviewing_run_to_research(backend, fake_c
     with backend.unit_of_work() as uow:
         final = uow.runs.get(run.run_id)
         assert final.state is RunState.RESEARCHING
-        # 7.2: 'resolved' now consumes one shared replan budget via Focused Replan.
-        assert final.replan_count == 1
+        assert final.replan_count == 0
+        assert final.current_plan_version == 1
+        assert uow.plans.current(run.run_id).version == 1
+        assert EffectType.PLAN_REPLANNED not in {
+            event.effect for event in uow.events.stream(run.run_id)
+        }
         assert uow.gates.get(gate.gate_id).state is GateState.CONSUMED
         uow.rollback()
 

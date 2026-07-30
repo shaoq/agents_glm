@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agents_orchestration.domain.enums import RunState, TaskState, WorkerRole
+from agents_orchestration.domain.enums import CapabilityKind, RunState, TaskState, WorkerRole
 from agents_orchestration.domain.plan import TaskSpec
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
@@ -148,6 +148,106 @@ def test_empty_add_rejected_with_no_write(backend) -> None:
                 current, proposal, transition_to=RunState.RESEARCHING
             )
         uow.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("task_spec", "diagnostic"),
+    [
+        (
+            TaskSpec(
+                task_id="t3",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap",
+                depends_on=("missing-task",),
+            ),
+            "unknown task",
+        ),
+        (
+            TaskSpec(
+                task_id="t3",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap",
+                required_capabilities=(CapabilityKind.WEB_RESEARCH,),
+            ),
+            "unsupported capability",
+        ),
+    ],
+)
+def test_plan_validator_rejects_invalid_candidate_before_any_write(
+    backend, task_spec, diagnostic
+) -> None:
+    """A caller may catch validation and still commit; invalid candidates must
+    therefore be rejected before preserved Tasks are promoted to Plan v2."""
+
+    run = _to_analyzing(_seed_researching(backend), backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="research_gap",
+        add_task_specs=(task_spec,),
+    )
+
+    with backend.unit_of_work() as uow:
+        current = uow.runs.get(run.run_id)
+        with pytest.raises(ValueError, match=diagnostic):
+            _service(uow, backend).replan_and_transition(
+                current, proposal, transition_to=RunState.RESEARCHING
+            )
+        uow.commit()
+
+    with backend.unit_of_work() as uow:
+        persisted_run = uow.runs.get(run.run_id)
+        persisted_plan = uow.plans.current(run.run_id)
+        t1 = uow.tasks.get("t1")
+        t3 = uow.tasks.get("t3")
+        uow.commit()
+
+    assert persisted_run.current_plan_version == 1
+    assert persisted_run.state is RunState.ANALYZING
+    assert persisted_plan.version == 1
+    assert t1.plan_version == 1
+    assert t3 is None
+
+
+@pytest.mark.integration
+def test_plan_validator_rejects_depends_on_cycle_before_any_write(backend) -> None:
+    run = _to_analyzing(_seed_researching(backend), backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="research_gap",
+        add_task_specs=(
+            TaskSpec(
+                task_id="t3",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap A",
+                depends_on=("t4",),
+            ),
+            TaskSpec(
+                task_id="t4",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap B",
+                depends_on=("t3",),
+            ),
+        ),
+    )
+
+    with backend.unit_of_work() as uow:
+        current = uow.runs.get(run.run_id)
+        with pytest.raises(ValueError, match="cycle"):
+            _service(uow, backend).replan_and_transition(
+                current, proposal, transition_to=RunState.RESEARCHING
+            )
+        uow.commit()
+
+    with backend.unit_of_work() as uow:
+        plan = uow.plans.current(run.run_id)
+        t1 = uow.tasks.get("t1")
+        t3 = uow.tasks.get("t3")
+        t4 = uow.tasks.get("t4")
+        uow.commit()
+    assert plan.version == 1
+    assert t1.plan_version == 1
+    assert t3 is None and t4 is None
 
 
 @pytest.mark.integration

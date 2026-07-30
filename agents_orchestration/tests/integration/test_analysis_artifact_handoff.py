@@ -144,8 +144,15 @@ async def test_unreferenced_blob_is_invisible(backend):
     await store.materialize(
         run_id="r1", plan_version=1, analysis=_analysis(), source_evidence_hash="sha256:ev"
     )
-    # No ACCEPTED ANALYZE stage references it.
+    with backend.unit_of_work() as uow:
+        metadata = uow.artifacts.list_all()
+        orphans = uow.artifacts.list_orphans()
+        uow.commit()
+
+    # No ACCEPTED ANALYZE stage references or registers it.
     assert accepted_analysis_ref(_stages(backend), "r1", 1) is None
+    assert metadata == []
+    assert len(orphans) == 1
 
 
 @pytest.mark.integration
@@ -269,8 +276,10 @@ async def test_writer_consumes_same_artifact_as_accepted_stage(backend) -> None:
 
     with backend.unit_of_work() as uow:
         ref = accepted_analysis_ref(uow.stages, run.run_id, 1)
+        metadata = uow.artifacts.get_by_id(ref.artifact_id)
         uow.commit()
     assert ref is not None
+    assert metadata is not None
     # Same entity id + content hash flowed from ANALYZE accept into the writer.
     assert ref.content_hash == captured["hash"]
     assert ref.artifact_id.startswith("analysis_")

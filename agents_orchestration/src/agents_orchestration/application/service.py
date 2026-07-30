@@ -30,6 +30,7 @@ from agents_orchestration.domain.enums import (
 )
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Attempt, Run, Task
+from agents_orchestration.domain.lifecycle import GateContinuationIntent
 from agents_orchestration.domain.plan import PlanAcceptance
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
@@ -375,14 +376,15 @@ class OrchestrationService:
             if (
                 gate.gate_type is GateType.CONFLICT_RESOLUTION
                 and validated.outcome == "resolved"
+                and gate.continuation is not None
+                and gate.continuation.intent
+                is GateContinuationIntent.REVIEW_RESEARCH_GAP
             ):
                 # analyze-sufficiency-feedback 7.2/7.3: a "continue research"
                 # continuation runs the SAME shared Focused Replan as ANALYZE
                 # (or terminates deterministically when budget is exhausted),
                 # instead of a bare state jump back to RESEARCHING.
-                final_run, terminated = self._apply_research_gap_continuation(
-                    uow, run, validated, now
-                )
+                final_run, terminated = self._apply_research_gap_continuation(uow, run, gate, now)
                 replanned = not terminated
                 if terminated:
                     uow.runs.save(final_run, expected_version=original_version)
@@ -475,18 +477,21 @@ class OrchestrationService:
         return base
 
     def _apply_research_gap_continuation(
-        self, uow, run: Run, validated, now
+        self, uow, run: Run, gate, now
     ) -> tuple[Run, bool]:
         """CONFLICT_RESOLUTION 'resolved' continuation (tasks 7.2 / 7.3).
 
-        Uses the responder's ``resolution`` as the (untrusted, length-bounded)
-        gap hint for the SAME FocusedReplanBuilder + atomic
+        Uses the persisted, length-bounded REVIEW feedback as the gap hint for
+        the SAME FocusedReplanBuilder + atomic
         ``replan_and_transition`` that ANALYZE uses. If the shared replan budget
         is already exhausted, the Run terminates with REQUIRED_EVIDENCE_MISSING
         and no Plan/Task is created. Returns ``(final_run, terminated)``.
         """
 
-        gap_hint = validated.resolution or "continue research per review feedback"
+        continuation = gate.continuation
+        if continuation is None or not continuation.feedback:
+            raise ValueError("review research-gap continuation is missing persisted feedback")
+        gap_hint = continuation.feedback
         if run.replan_count >= run.policy.max_replans:
             return run.terminate(TerminationReason.REQUIRED_EVIDENCE_MISSING, now), True
         builder = FocusedReplanBuilder(
@@ -499,7 +504,7 @@ class OrchestrationService:
             gap_hint=gap_hint,
         )
         correlation = {
-            "gap_id": focused.gap.gap_id,
+            "gap_id": continuation.correlation_id or focused.gap.gap_id,
             "focus_hash": focused.gap.focus_hash,
             "source_phase": "review",
             "source_state_version": run.state_version,

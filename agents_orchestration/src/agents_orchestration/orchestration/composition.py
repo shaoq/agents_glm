@@ -236,7 +236,10 @@ def build_production_coordinator_from_settings(
     async def evidence_set(run_id: str) -> EvidenceSet:
         with backend.unit_of_work() as uow:
             evs = tuple(uow.evidence.by_run(run_id))
-        return EvidenceSet.join(run_id=run_id, task_id="research", evidences=evs, required=False)
+        # ResearchPhaseHandler joins the dispatchable research Plan as required.
+        # Reconstruct the same semantics here so an empty persisted evidence set
+        # remains INSUFFICIENT and reaches ANALYZE's deterministic L0 branch.
+        return EvidenceSet.join(run_id=run_id, task_id="research", evidences=evs, required=True)
 
     async def analysis_provider(run_id: str):
         # WRITING/FINALIZE load the ANALYZE-accepted artifact; the analyst is no

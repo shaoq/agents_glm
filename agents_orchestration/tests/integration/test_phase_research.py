@@ -66,7 +66,9 @@ def _seed_task(backend, run: Run, task_id: str, role: WorkerRole, state: TaskSta
 def test_eligible_worker_roles_only_research_dispatches() -> None:
     # Only RESEARCHING has a dispatchable role (remove-noop-phase-tasks 2.2);
     # ANALYZE/WRITE/REVIEW are coordinator-owned ports, not dispatched phases.
-    assert eligible_worker_roles(RunState.RESEARCHING) == frozenset({WorkerRole.EVIDENCE_RESEARCHER})
+    assert eligible_worker_roles(RunState.RESEARCHING) == frozenset(
+        {WorkerRole.EVIDENCE_RESEARCHER}
+    )
 
 
 @pytest.mark.unit

@@ -96,9 +96,14 @@ async def test_l0_zero_evidence_short_circuits_without_model(backend) -> None:
     assert report.to_state is RunState.RESEARCHING  # focused replan
     with backend.unit_of_work() as uow:
         moved = uow.runs.get(run.run_id)
+        stages = uow.stages.for_logical_stage(run.run_id, "analyze")
         uow.commit()
     assert moved.replan_count == 1
     assert moved.current_plan_version == 2
+    assert len(stages) == 1
+    assert stages[0].status.value == "accepted"
+    assert "verdict:research_gap" in stages[0].output_entity_ids
+    assert any(entity.startswith("gap:") for entity in stages[0].output_entity_ids)
 
 
 # --- L1 sufficient / conflict -> WRITING (5.6) ----------------------------
@@ -120,6 +125,7 @@ async def test_l1_sufficient_accepts_analysis_and_enters_writing(backend) -> Non
         ref = accepted_analysis_ref(uow.stages, run.run_id, moved.current_plan_version)
         uow.commit()
     assert ref is not None  # accepted artifact recorded for the writer
+    assert ref.source_evidence_hash.startswith("sha256:")
 
 
 @pytest.mark.integration
@@ -204,6 +210,114 @@ async def test_provider_failure_degrades_to_idle_without_state_change(backend) -
     assert report.disposition is AdvanceDisposition.IDLE
     assert "analyze-provider-failed" in report.reason
     assert report.continue_immediately is False
+
+
+@pytest.mark.integration
+async def test_explicit_retry_accepts_analysis_after_provider_recovers(backend) -> None:
+    run = _seed_analyzing(backend)
+
+    class _RecoveringAnalyst:
+        calls = 0
+
+        async def __call__(self, run_id, evidence):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("analyst temporarily unavailable")
+            return await _ok_analyst(run_id, evidence)
+
+    analyst = _RecoveringAnalyst()
+    handler = _handler_with_evidence(
+        backend, analyst, FakeSufficiencyReviewer(), _empty_evidence_optional
+    )
+    coordinator = RunCoordinator(backend, {PhaseId.ANALYZE: handler})
+
+    first = await coordinator.advance(run.run_id)
+    second = await coordinator.advance(run.run_id)
+
+    assert first.disposition is AdvanceDisposition.IDLE
+    assert second.disposition is AdvanceDisposition.PROGRESSED
+    assert second.to_state is RunState.WRITING
+    assert analyst.calls == 2
+
+
+@pytest.mark.integration
+async def test_focused_replan_builder_failure_degrades_to_idle_without_writes(
+    backend,
+) -> None:
+    run = _seed_analyzing(backend)
+
+    class _FailingBuilder:
+        def build(self, **kwargs):
+            raise RuntimeError("replan backend unavailable")
+
+    handler = AnalysisPhaseHandler(
+        _ok_analyst,
+        _empty_evidence_optional,
+        _store(backend),
+        FakeSufficiencyReviewer(
+            SufficiencyVerdict.RESEARCH_GAP, gap_hint="need pricing data"
+        ),
+        _FailingBuilder(),
+        PlanValidator(SystemLimits()),
+        clock=backend.clock,
+        idgen=backend.idgen,
+    )
+
+    report = await RunCoordinator(backend, {PhaseId.ANALYZE: handler}).advance(run.run_id)
+
+    assert report.disposition is AdvanceDisposition.IDLE
+    assert report.reason == "analyze-replan-failed:RuntimeError"
+    assert report.continue_immediately is False
+    with backend.unit_of_work() as uow:
+        moved = uow.runs.get(run.run_id)
+        plan = uow.plans.current(run.run_id)
+        uow.commit()
+    assert moved.state is RunState.ANALYZING
+    assert moved.replan_count == 0
+    assert plan.version == 1
+
+
+@pytest.mark.integration
+async def test_explicit_retry_replans_after_focused_builder_recovers(backend) -> None:
+    run = _seed_analyzing(backend)
+    delegate = FocusedReplanBuilder(ALL_CAPS, backend.idgen)
+
+    class _RecoveringBuilder:
+        calls = 0
+
+        def build(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("replan backend temporarily unavailable")
+            return delegate.build(**kwargs)
+
+    builder = _RecoveringBuilder()
+    handler = AnalysisPhaseHandler(
+        _ok_analyst,
+        _empty_evidence_optional,
+        _store(backend),
+        FakeSufficiencyReviewer(
+            SufficiencyVerdict.RESEARCH_GAP, gap_hint="need pricing data"
+        ),
+        builder,
+        PlanValidator(SystemLimits()),
+        clock=backend.clock,
+        idgen=backend.idgen,
+    )
+    coordinator = RunCoordinator(backend, {PhaseId.ANALYZE: handler})
+
+    first = await coordinator.advance(run.run_id)
+    second = await coordinator.advance(run.run_id)
+
+    assert first.disposition is AdvanceDisposition.IDLE
+    assert second.disposition is AdvanceDisposition.PROGRESSED
+    assert second.to_state is RunState.RESEARCHING
+    assert builder.calls == 2
+    with backend.unit_of_work() as uow:
+        moved = uow.runs.get(run.run_id)
+        uow.commit()
+    assert moved.replan_count == 1
+    assert moved.current_plan_version == 2
 
 
 # --- budget exhaustion -> deterministic TERMINAL (6.3) --------------------

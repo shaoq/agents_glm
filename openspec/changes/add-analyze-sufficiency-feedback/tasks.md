@@ -72,3 +72,13 @@
 - [x] 10.3 E2E：L0 零证据短路、conflict 交由 REVIEW、budget 耗尽终止和 provider failure 停止立即驱动
 - [x] 10.4 运行 `openspec validate add-analyze-sufficiency-feedback --strict`、完整测试套件、ruff 与覆盖率检查，保持项目要求的覆盖率阈值
 - [x] 10.5 实施完成且提交前运行 `gitnexus_detect_changes()`，确认只影响预期 symbols 与 execution flows
+
+## 11. 代码审查修复
+
+- [x] 11.1 在 Focused Replan 首次写入前对完整候选 PlanGraph 执行 PlanValidator，并覆盖非法依赖、capability 与零写入
+- [x] 11.2 让生产 EvidenceSet 保留 required research 语义，覆盖零证据 L0 不调用模型
+- [x] 11.3 持久化 REVIEW research-gap 的类型化 Gate context，仅该来源的 resolved continuation 执行 Focused Replan
+- [x] 11.4 将 Analysis blob 物化与 metadata 注册分离，并在 ACCEPTED Stage 事务内登记权威 artifact
+- [x] 11.5 ANALYZE gap 回环保存结构化 Stage，Focused Replan 构造异常降级为不可立即重试的 UPSTREAM_ERROR
+- [x] 11.6 运行严格 OpenSpec、定向/全量测试、覆盖率、ruff、diff check 与 GitNexus 变更检测
+  - linked worktree 的 GitNexus `detect-changes` 仍固定读取 canonical root；已保留单一 canonical index，并以 worktree 原始 diff 加 canonical symbol impact 复核实际范围

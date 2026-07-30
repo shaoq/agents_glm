@@ -69,8 +69,10 @@ async def test_planner_parses_task_specs() -> None:
     adapter = _FakeAdapter(
         tool_result=_tool_ok(
             '{"tasks":['
-            '{"task_id":"t1","role":"evidence_researcher","description":"gather A","source_hints":["local_knowledge"]},'
-            '{"task_id":"t2","role":"evidence_researcher","description":"gather B","source_hints":["live_web"]}'
+            '{"task_id":"t1","role":"evidence_researcher","description":"gather A",'
+            '"source_hints":["local_knowledge"]},'
+            '{"task_id":"t2","role":"evidence_researcher","description":"gather B",'
+            '"source_hints":["live_web"]}'
             '],"deliverable_paths":["report.md"]}',
             "propose_plan",
         )

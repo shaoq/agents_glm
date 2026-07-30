@@ -39,6 +39,7 @@ from agents_orchestration.domain.enums import (
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.execution import Run
+from agents_orchestration.domain.lifecycle import GateContinuationIntent
 from agents_orchestration.domain.plan import Plan
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.domain.state_machine import assert_run_transition
@@ -47,6 +48,7 @@ from agents_orchestration.orchestration.coordinator import (
     PhaseOutcome,
     transition_or_stay,
 )
+from agents_orchestration.orchestration.focused_replan import sanitize_gap
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
 from agents_orchestration.orchestration.proposals import (
     GoalNormalizationOutcome,
@@ -466,7 +468,11 @@ class AnalysisPhaseHandler:
             input_fingerprint=fp,
             proposal=outcome,
             output_refs=(ref.as_artifact_ref(),),
-            output_entities=(ref.artifact_id,),
+            output_entities=(
+                ref.artifact_id,
+                f"verdict:{review.verdict.value}",
+                f"source_evidence_hash:{ev_hash}",
+            ),
         )
 
     def _gap_outcome(
@@ -496,7 +502,10 @@ class AnalysisPhaseHandler:
                 proposal=outcome,
                 termination_reason=TerminationReason.REQUIRED_EVIDENCE_MISSING,
             )
-        focused = self._build_focused_replan(ctx, backend, hint)
+        try:
+            focused = self._build_focused_replan(ctx, backend, hint)
+        except Exception as exc:
+            return self._idle(fp, f"analyze-replan-failed:{type(exc).__name__}")
         outcome = AnalysisSufficiencyOutcome(
             review=review,
             source_evidence_hash=ev_hash,
@@ -510,6 +519,12 @@ class AnalysisPhaseHandler:
             stage_logical_key="analyze",
             input_fingerprint=fp,
             proposal=outcome,
+            output_entities=(
+                "verdict:research_gap",
+                focused.gap.gap_id,
+                focused.gap.focus_hash,
+                f"source_evidence_hash:{ev_hash}",
+            ),
             handled_accept=True,
             continue_immediately=True,
         )
@@ -684,11 +699,22 @@ class ReviewPhaseHandler:
                     input_fingerprint=fp,
                     proposal=proposal,
                 )
+            feedback = sanitize_gap(
+                " ".join(
+                    part
+                    for part in (proposal.reason, *proposal.suggested_actions)
+                    if part and part.strip()
+                )
+                or "Report review identified missing research evidence."
+            )
             return PhaseOutcome(
                 AdvanceDisposition.BLOCKED,
                 next_state=None,
                 reason="review-research-gap",
                 open_gate=GateType.CONFLICT_RESOLUTION,
+                gate_intent=GateContinuationIntent.REVIEW_RESEARCH_GAP,
+                gate_feedback=feedback.cleaned,
+                gate_correlation_id=feedback.gap_id,
                 stage_logical_key="review",
                 input_fingerprint=fp,
                 proposal=proposal,

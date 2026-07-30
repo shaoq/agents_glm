@@ -53,7 +53,10 @@ async def test_review_gap_opens_gate_without_consuming_replan_budget(backend) ->
     service = _service_with_review_gap(backend)
     run = await service.start_and_drive("clear goal", request_id="rg-1")
     assert run.state is RunState.REVIEWING
-    _conflict_gate(service, run.run_id)  # gate opened
+    gate = _conflict_gate(service, run.run_id)
+    assert gate.continuation.intent == "review_research_gap"
+    assert gate.continuation.feedback == "evidence gap"
+    assert gate.continuation.correlation_id.startswith("gap:")
     assert service.get_run(run.run_id).replan_count == 0  # 7.1: zero count at open
 
 
@@ -88,6 +91,8 @@ async def test_resolved_continuation_creates_focused_replan(backend) -> None:
         effects = [e.effect.value for e in uow.events.stream(run.run_id)]
         uow.commit()
     assert len(new_pending) >= 1  # new PENDING research task
+    assert "evidence gap" in new_pending[0].description
+    assert "collect competitor pricing" not in new_pending[0].description
     assert "plan_replanned" in effects
 
 

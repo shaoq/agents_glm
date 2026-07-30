@@ -21,7 +21,7 @@ from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.plan import Dependency, Plan, PlanGraph, TaskSpec
 from agents_orchestration.domain.state_machine import assert_run_transition
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
-from agents_orchestration.orchestration.proposals import ReplanProposal
+from agents_orchestration.orchestration.proposals import PlanProposal, ReplanProposal
 
 
 class ReplanBudgetExhausted(RuntimeError):
@@ -107,6 +107,7 @@ class ReplanService:
             raise ReplanBudgetExhausted(
                 f"replan budget exhausted ({run.replan_count}/{run.policy.max_replans})"
             )
+        self._validate_candidate(run, proposal)
 
         plan, preserved_ids, invalidate, next_version, added_ids = self._persist_replan_graph(
             run, proposal, timestamp
@@ -157,6 +158,68 @@ class ReplanService:
             ]
         )
         return plan, new_run
+
+    def _validate_candidate(self, run: Run, proposal: ReplanProposal) -> None:
+        """Validate the complete Plan v+1 graph before the first repository write."""
+
+        if proposal.run_id != run.run_id:
+            raise ValueError(
+                f"replan run_id {proposal.run_id} does not match Run {run.run_id}"
+            )
+        current = self.uow.plans.current(run.run_id)
+        if current is None:
+            raise ValueError(f"Run {run.run_id} has no plan to replan")
+
+        invalidate = set(proposal.invalidate_task_ids)
+        current_tasks = self.uow.tasks.by_run(run.run_id, current.version)
+        preserved_specs = tuple(
+            self._to_spec(task)
+            for task in current_tasks
+            if task.task_id not in invalidate
+            and task.worker_role is WorkerRole.EVIDENCE_RESEARCHER
+        )
+        candidate_specs = preserved_specs + tuple(proposal.add_task_specs)
+        task_ids = [spec.task_id for spec in candidate_specs]
+        if len(task_ids) != len(set(task_ids)):
+            raise ValueError("focused replan contains duplicate task ids")
+
+        preserved_ids = {spec.task_id for spec in preserved_specs}
+        carried_dependencies = tuple(
+            dep
+            for dep in self.uow.dependencies.by_plan(run.run_id, current.version)
+            if dep.predecessor in preserved_ids and dep.successor in preserved_ids
+        )
+        candidate_dependencies = self._merge_dependencies(
+            carried_dependencies,
+            tuple(proposal.add_dependencies),
+            self._depends_on_edges(candidate_specs),
+        )
+        candidate = PlanProposal(
+            run_id=run.run_id,
+            plan_id=current.graph.plan_id,
+            task_specs=candidate_specs,
+            dependencies=candidate_dependencies,
+            deliverable_paths=current.graph.deliverable_paths,
+        )
+        completion = run.completion or self.uow.completion.get(run.run_id)
+        if completion is None:
+            raise ValueError(f"Run {run.run_id} has no CompletionContract")
+        approved_capabilities = frozenset(
+            capability
+            for spec in current.graph.task_specs
+            for capability in spec.required_capabilities
+        )
+        validation = self.validator.validate(
+            candidate,
+            policy=run.policy,
+            allowed_capabilities=approved_capabilities,
+            completion=completion,
+            version=current.version + 1,
+        )
+        if not validation.accepted:
+            raise ValueError(
+                "invalid focused replan: " + "; ".join(validation.diagnostics)
+            )
 
     # --- shared plan persistence (no Run/event side effects) ----------------
 
@@ -227,12 +290,16 @@ class ReplanService:
             for d in self.uow.dependencies.by_plan(run.run_id, current.version)
             if d.predecessor in preserved_ids and d.successor in preserved_ids
         ]
-        all_deps: list[Dependency] = carried_deps + list(proposal.add_dependencies)
-        self.uow.dependencies.save(run.run_id, next_version, all_deps)
-
         all_specs: tuple[TaskSpec, ...] = tuple(self._to_spec(t) for t in preserved) + tuple(
             proposal.add_task_specs
         )
+        all_deps = self._merge_dependencies(
+            tuple(carried_deps),
+            tuple(proposal.add_dependencies),
+            self._depends_on_edges(all_specs),
+        )
+        self.uow.dependencies.save(run.run_id, next_version, list(all_deps))
+
         graph = PlanGraph(
             plan_id=current.graph.plan_id,
             version=next_version,
@@ -245,6 +312,28 @@ class ReplanService:
         self.uow.plans.save(current.supersede(next_version))
         added_ids = [s.task_id for s in proposal.add_task_specs]
         return plan, preserved_ids, invalidate, next_version, added_ids
+
+    @staticmethod
+    def _depends_on_edges(specs: tuple[TaskSpec, ...]) -> tuple[Dependency, ...]:
+        return tuple(
+            Dependency(predecessor=predecessor, successor=spec.task_id)
+            for spec in specs
+            for predecessor in spec.depends_on
+        )
+
+    @staticmethod
+    def _merge_dependencies(
+        *groups: tuple[Dependency, ...],
+    ) -> tuple[Dependency, ...]:
+        merged: dict[tuple[str, str, object], Dependency] = {}
+        for dependency in (dep for group in groups for dep in group):
+            key = (
+                dependency.predecessor,
+                dependency.successor,
+                dependency.kind,
+            )
+            merged.setdefault(key, dependency)
+        return tuple(merged.values())
 
     @staticmethod
     def _require_transition(current: RunState, target: RunState) -> None:

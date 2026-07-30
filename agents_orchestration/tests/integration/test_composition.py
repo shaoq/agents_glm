@@ -74,6 +74,27 @@ async def test_deterministic_composition_drives_clear_goal_to_succeeded(backend)
 
 
 @pytest.mark.integration
+async def test_settings_composition_preserves_required_research_for_empty_evidence(
+    backend,
+) -> None:
+    """The production ANALYZE provider must reproduce ResearchPhaseHandler's
+    required Join semantics so zero evidence reaches the deterministic L0 path."""
+
+    from agents_orchestration.config import Settings
+    from agents_orchestration.domain.coordination import PhaseId
+    from agents_orchestration.domain.enums import Sufficiency
+    from agents_orchestration.orchestration.composition import (
+        build_production_coordinator_from_settings,
+    )
+
+    coordinator = build_production_coordinator_from_settings(backend, Settings())
+    evidence = await coordinator.handlers[PhaseId.ANALYZE].evidence_provider("run-empty")
+
+    assert evidence.sufficiency is Sufficiency.INSUFFICIENT
+    assert evidence.missing_required
+
+
+@pytest.mark.integration
 def test_production_composition_rejects_incomplete(backend) -> None:
     """Task 9.8: a production profile with a missing required port must fail
     loudly rather than silently substituting a Fake."""

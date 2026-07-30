@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents_orchestration.domain.artifact import ArtifactRef
 from agents_orchestration.domain.enums import FailureCode, GateType, RunState, WorkerRole
 from agents_orchestration.domain.ids import RunId
-from agents_orchestration.domain.lifecycle import GateContinuation
+from agents_orchestration.domain.lifecycle import GateContinuation, GateContinuationIntent
 
 # --- Task 2.1 / 2.2: advance disposition + report --------------------------
 
@@ -325,7 +325,14 @@ GATE_CONTINUATION_NEXT: dict[GateType, dict[str, str]] = {
 }
 
 
-def build_gate_continuation(gate_type: GateType, run) -> GateContinuation:
+def build_gate_continuation(
+    gate_type: GateType,
+    run,
+    *,
+    intent: GateContinuationIntent | None = None,
+    feedback: str | None = None,
+    correlation_id: str | None = None,
+) -> GateContinuation:
     """Construct the version-bound continuation for a Gate opened from ``run``'s
     current phase (task 8.3 / 8.6)."""
     phase = phase_for_state(run.state)
@@ -333,6 +340,9 @@ def build_gate_continuation(gate_type: GateType, run) -> GateContinuation:
         origin_phase=phase.value if phase else run.state.value,
         bound_state_version=run.state_version,
         bound_plan_version=run.current_plan_version,
+        intent=intent,
+        feedback=feedback,
+        correlation_id=correlation_id,
         next_state_by_outcome=tuple(GATE_CONTINUATION_NEXT.get(gate_type, {}).items()),
     )
 
