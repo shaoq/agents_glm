@@ -395,7 +395,13 @@ def resolve_gate_continuation(gate, run, outcome: str) -> ContinuationResolution
         return ContinuationResolution(
             ContinuationOutcome.UNKNOWN_OUTCOME, reason=f"outcome '{outcome}' not mapped"
         )
-    target_state = RunState(target)
+    try:
+        target_state = RunState(target)
+    except ValueError:
+        return ContinuationResolution(
+            ContinuationOutcome.INVALID_TRANSITION,
+            reason=f"unknown RunState target '{target}'",
+        )
     if target_state is run.state:
         return ContinuationResolution(ContinuationOutcome.SAME_STATE, target_state=target_state)
     try:

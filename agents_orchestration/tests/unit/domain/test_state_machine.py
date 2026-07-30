@@ -48,6 +48,11 @@ def test_run_assert_invalid_raises() -> None:
 
 
 @pytest.mark.unit
+def test_reviewing_can_return_to_researching_after_conflict_resolution() -> None:
+    assert can_transition_run(RunState.REVIEWING, RunState.RESEARCHING)
+
+
+@pytest.mark.unit
 def test_run_terminal_states_are_terminal() -> None:
     for terminal in (RunState.SUCCEEDED, RunState.FAILED, RunState.CANCELED):
         assert run_transitions(terminal) == frozenset()

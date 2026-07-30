@@ -51,7 +51,7 @@
 #### Scenario: PLAN_APPROVAL approved
 
 - **WHEN** 合法 PLAN_APPROVAL response 的 outcome 为 `approved`
-- **THEN** Run 进入 RESEARCHING
+- **THEN** 系统接受 Gate 打开前持久化的待审批 Plan，在同一事务物化其 Tasks/Dependencies，并让 Run 以该 Plan version 进入 RESEARCHING
 
 #### Scenario: PLAN_APPROVAL rejected
 
@@ -134,6 +134,11 @@ GOAL_CLARIFICATION 的 clarification SHALL 作为原始目标的补充上下文�
 
 - **WHEN** Gate response 被成功消费
 - **THEN** durable event 包含 gate ID、Gate 类型、outcome、原 state version 和新 state version
+
+#### Scenario: Gate 后发事件可被增量消费
+
+- **WHEN** 观察者已消费到 Gate 打开时的 state version，随后 Gate 被成功消费或因 stale continuation 失效
+- **THEN** 新增的 `GATE_RESPONDED`、`GATE_CONSUMED` 或 `GATE_INVALIDATED` 使用事件发生时的当前或最终 Run state version，并可由 `after_state_version` 查询返回
 
 #### Scenario: 消费后显式推进
 

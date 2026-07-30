@@ -94,6 +94,7 @@ User clarification:
 4. 将 Gate 转为 RESPONDED，再转为 CONSUMED；
 5. 从原 Run 构造最终 Run：
    - GOAL clarified 同时写入 `goal_clarification`；
+   - PLAN_APPROVAL Gate 打开前持久化已验证的 `PROPOSED` Plan；approved 时在消费事务内接受该 Plan 并物化 Tasks/Dependencies；
    - 非终态 outcome 应用目标状态；
    - same-state 也更新 `updated_at` 并把 `state_version` 加一；
    - cancelled 使用 `TerminationReason.CANCELED`；
@@ -117,6 +118,7 @@ User clarification:
 - 进入 CANCELED/FAILED 时写 `RUN_TERMINATED`，并带 termination reason；
 - Gate 仍写 `GATE_RESPONDED` 和 `GATE_CONSUMED`。
 - stale Gate 不写正常响应/消费事件，只写 `GATE_INVALIDATED`。
+- Gate 后发事件使用事件发生时的当前或最终 Run state version，使 `after_state_version` 增量消费者不会遗漏这些事件。
 
 所有事件与 Gate/Run 状态在同一事务提交。后续 `advance_run`、`drive_run` 或 watch 再创建新的 Attempt/Lease；`respond_gate` 保持同步、有限、可重试。
 

@@ -231,6 +231,21 @@ class PlanningPhaseHandler:
         _plan, new_run = PlanAcceptor(uow, self.clock, self.idgen).accept(run, proposal, validation)
         return new_run
 
+    def persist_for_approval(
+        self, outcome: PhaseOutcome, run: Run, uow, now: datetime
+    ) -> None:
+        """Persist a validated proposal before opening its approval Gate."""
+
+        proposal = outcome.proposal
+        next_version = (run.current_plan_version or 0) + 1
+        uow.plans.save(
+            Plan(
+                run_id=run.run_id,
+                graph=proposal.to_graph(next_version),
+                proposed_at=now,
+            )
+        )
+
 
 class ResearchPhaseHandler:
     """RESEARCHING phase (tasks 6.7-6.10): drive research Tasks through the

@@ -301,6 +301,8 @@ class RunCoordinator:
         with self.backend.unit_of_work() as uow:
             if outcome.input_fingerprint is not None:
                 self._persist_observation_stage(uow, run, phase, outcome, now)
+            if outcome.open_gate is GateType.PLAN_APPROVAL:
+                self.handlers[phase].persist_for_approval(outcome, run, uow, now)
             if outcome.open_gate is not None:
                 self._open_gate(uow, run, outcome)  # emits GATE_OPENED
             # No RUN_STATE_TRANSITION event: a BLOCKED outcome does not change

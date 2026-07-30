@@ -16,7 +16,7 @@ from agents_orchestration.domain.goal import (
     CriterionKind,
     GoalSpec,
 )
-from agents_orchestration.domain.plan import TaskSpec
+from agents_orchestration.domain.plan import PlanAcceptance, TaskSpec
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.orchestration.coordinator import RunCoordinator
 from agents_orchestration.orchestration.phases import GoalPhaseHandler, PlanningPhaseHandler
@@ -231,6 +231,49 @@ async def test_planning_approval_required_opens_plan_approval_gate(backend) -> N
         assert any(g.gate_type.value == "plan_approval" for g in gates)
         assert uow.tasks.get("t1") is None  # not materialized until the gate is approved
         uow.commit()
+
+
+@pytest.mark.integration
+async def test_plan_approval_accepts_pending_plan_and_materializes_tasks(backend) -> None:
+    run = _seed_planning(backend)
+    handler = PlanningPhaseHandler(
+        _Planner(_valid_proposal(run.run_id)),
+        limits=SystemLimits(),
+        allowed_capabilities=ALL_CAPS,
+        clock=backend.clock,
+        idgen=backend.idgen,
+        approval_required=True,
+    )
+    coord = RunCoordinator(backend, {PhaseId.PLAN: handler})
+    service = OrchestrationService(backend, coordinator=coord)
+
+    blocked = await service.advance_run(run.run_id)
+    assert blocked.disposition is AdvanceDisposition.BLOCKED
+    with backend.unit_of_work() as uow:
+        pending = uow.plans.current(run.run_id)
+        assert pending is not None
+        assert pending.acceptance is PlanAcceptance.PROPOSED
+        assert uow.tasks.get("t1") is None
+        gate = next(iter(uow.gates.open_for_run(run.run_id)))
+        uow.rollback()
+
+    service.respond_gate(
+        gate.gate_id,
+        request_id="rq-plan-approved",
+        actor="approver",
+        role="orchestrator",
+        payload={"outcome": "approved"},
+    )
+
+    with backend.unit_of_work() as uow:
+        final = uow.runs.get(run.run_id)
+        accepted = uow.plans.current(run.run_id)
+        assert final.state is RunState.RESEARCHING
+        assert final.current_plan_version == 1
+        assert accepted is not None
+        assert accepted.acceptance is PlanAcceptance.ACCEPTED
+        assert uow.tasks.get("t1") is not None
+        uow.rollback()
 
 
 # --- task 4.1 / 4.3: effective goal context flows into normalization -------

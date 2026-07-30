@@ -235,6 +235,23 @@ def test_resolve_invalid_transition() -> None:
     assert res.target_state is RunState.RESEARCHING
 
 
+@pytest.mark.unit
+def test_resolve_malformed_target_as_invalid_transition() -> None:
+    run = _run(RunState.PLANNING)
+    cont = GateContinuation(
+        origin_phase="plan",
+        bound_state_version=run.state_version,
+        next_state_by_outcome=(("approved", "corrupt-state"),),
+    )
+    gate = _gate(run, GateType.PLAN_APPROVAL, cont)
+
+    res = resolve_gate_continuation(gate, run, "approved")
+
+    assert res.outcome is ContinuationOutcome.INVALID_TRANSITION
+    assert res.target_state is None
+    assert "corrupt-state" in res.reason
+
+
 # --- task 2.3: same-state apply bumps the version --------------------------
 
 

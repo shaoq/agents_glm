@@ -21,11 +21,20 @@ from agents_orchestration.domain.coordination import (
     ContinuationOutcome,
     resolve_gate_continuation,
 )
-from agents_orchestration.domain.enums import EffectType, RunState, TerminationReason, WorkerRole
+from agents_orchestration.domain.enums import (
+    EffectType,
+    GateType,
+    RunState,
+    TerminationReason,
+    WorkerRole,
+)
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Attempt, Run, Task
+from agents_orchestration.domain.plan import PlanAcceptance
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.domain.worker import TaskResult
+from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidation
+from agents_orchestration.orchestration.proposals import PlanProposal
 from agents_orchestration.runtime.ports import OrphanArtifactError, StaleVersionError
 from agents_orchestration.runtime.tick import RuntimeTick
 from agents_orchestration.runtime.watch import RuntimeWatch
@@ -349,7 +358,7 @@ class OrchestrationService:
                 ContinuationOutcome.APPLIED,
                 ContinuationOutcome.SAME_STATE,
             ):
-                self._invalidate_gate(uow, gate, validated, resolution, now)
+                self._invalidate_gate(uow, gate, run, validated, resolution, now)
                 uow.commit()
                 raise GateContinuationError(
                     f"gate {gate.gate_id} invalidated: {resolution.outcome.value}"
@@ -359,16 +368,39 @@ class OrchestrationService:
                 request_id=request_id, actor=actor, payload=payload, at=now
             )
             consumed = responded.consume(now)
-            final_run = self._amend_run_for_gate(run, resolution, validated, now)
+            final_run = None
+            if (
+                gate.gate_type is GateType.PLAN_APPROVAL
+                and validated.outcome == "approved"
+            ):
+                pending = uow.plans.current(run.run_id)
+                if pending is not None and pending.acceptance is PlanAcceptance.PROPOSED:
+                    graph = pending.graph
+                    proposal = PlanProposal(
+                        run_id=run.run_id,
+                        plan_id=graph.plan_id,
+                        task_specs=graph.task_specs,
+                        dependencies=graph.dependencies,
+                        deliverable_paths=graph.deliverable_paths,
+                    )
+                    _plan, final_run = PlanAcceptor(
+                        uow, self.backend.clock, self.backend.idgen
+                    ).accept(
+                        run,
+                        proposal,
+                        PlanValidation(accepted=True, diagnostics=(), graph=graph),
+                    )
+            if final_run is None:
+                final_run = self._amend_run_for_gate(run, resolution, validated, now)
+                uow.runs.save(final_run, expected_version=original_version)
             uow.gates.save(consumed)
-            uow.runs.save(final_run, expected_version=original_version)
             uow.events.append(
                 self._gate_consumption_events(gate, consumed, validated, run, final_run, now)
             )
             uow.commit()
             return consumed
 
-    def _invalidate_gate(self, uow, gate, validated, resolution, now) -> None:
+    def _invalidate_gate(self, uow, gate, run, validated, resolution, now) -> None:
         """Fail a Gate whose continuation cannot be safely applied (task 3.3).
 
         Gate -> CANCELED + ``GATE_INVALIDATED`` with the classified reason; the
@@ -383,7 +415,7 @@ class OrchestrationService:
                     event_id=self.backend.idgen.new_id("evt"),
                     run_id=gate.run_id,
                     effect=EffectType.GATE_INVALIDATED,
-                    state_version=gate.state_version,
+                    state_version=run.state_version,
                     occurred_at=now,
                     gate_id=gate.gate_id,
                     plan_version=gate.plan_version,
@@ -438,14 +470,14 @@ class OrchestrationService:
             DomainEvent(
                 event_id=idgen.new_id("evt"),
                 effect=EffectType.GATE_RESPONDED,
-                state_version=gate.state_version,
+                state_version=final_run.state_version,
                 payload={"gate_type": gate.gate_type.value},
                 **common,
             ),
             DomainEvent(
                 event_id=idgen.new_id("evt"),
                 effect=EffectType.GATE_CONSUMED,
-                state_version=gate.state_version,
+                state_version=final_run.state_version,
                 payload={"gate_type": gate.gate_type.value},
                 **common,
             ),

@@ -63,6 +63,7 @@ _RUN_PHASE_FORWARD: dict[RunState, frozenset[RunState]] = {
     ),
     RunState.REVIEWING: frozenset(
         {
+            RunState.RESEARCHING,
             RunState.WRITING,
             RunState.AWAITING_FINAL_REVIEW,
             RunState.FINALIZING,

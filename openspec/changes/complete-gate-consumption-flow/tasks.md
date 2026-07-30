@@ -37,3 +37,11 @@
 - [x] 5.3 增加 CLI 测试，覆盖合法 payload、非法 payload 的稳定退出码/诊断以及 response 后 Run 状态查询
 - [x] 5.4 运行 `test_gates`、`test_gate_continuation`、`test_pause_resume_gate_expiry`、Gate E2E 和完整测试套件
 - [x] 5.5 运行覆盖率检查，保证项目既有 80% 阈值继续通过
+
+## 6. 评审缺陷修复
+
+- [x] 6.1 在打开 PLAN_APPROVAL Gate 前持久化已验证的待审批 Plan，并在 approved 消费事务中接受 Plan、物化 Tasks/Dependencies 和推进 Run
+- [x] 6.2 允许 CONFLICT_RESOLUTION resolved 将 Run 从 REVIEWING 转回 RESEARCHING
+- [x] 6.3 将 continuation 的未知 RunState 目标分类为 INVALID_TRANSITION，使 Gate 失效事务能够提交
+- [x] 6.4 使用当前或最终 Run state version 记录后发 Gate 事件，保证 `after_state_version` 增量消费可见
+- [x] 6.5 增加上述场景的单元/集成回归测试，并重新运行完整测试、Ruff 与覆盖率检查
