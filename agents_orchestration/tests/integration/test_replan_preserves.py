@@ -13,8 +13,13 @@ from agents_orchestration.domain.goal import (
     CompletionCriterion,
     CriterionKind,
 )
-from agents_orchestration.domain.plan import TaskSpec
-from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+from agents_orchestration.domain.plan import (
+    ExplorationBoundary,
+    ResearchExecutionMode,
+    SeedExplorationBoundary,
+    TaskSpec,
+)
+from agents_orchestration.domain.policy import Budget, RunPolicy, SystemLimits
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
 from agents_orchestration.orchestration.proposals import PlanProposal, ReplanProposal
 from agents_orchestration.orchestration.replan import ReplanService
@@ -67,6 +72,68 @@ def _seed_researching(backend):
         t1 = uow.tasks.get("t1")
         uow.tasks.save(
             t1.transition(TaskState.SUCCEEDED, backend.clock.now(), accepted_attempt_id="att-1")
+        )
+        uow.commit()
+    return run
+
+
+def _seed_agent_loop_researching(backend):
+    run = Run(
+        run_id="agent-replan",
+        raw_goal="g",
+        state=RunState.PLANNING,
+        policy=RunPolicy.from_limits(SystemLimits()),
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    contract = CompletionContract(
+        criteria=(),
+        deliverable_paths=("report.md",),
+    )
+    specs = (
+        TaskSpec(
+            task_id="a1",
+            worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+            description="a1",
+            required_capabilities=(CapabilityKind.RAG_SEARCH,),
+        ),
+        TaskSpec(
+            task_id="a2",
+            worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+            description="a2",
+            required_capabilities=(CapabilityKind.RAG_SEARCH,),
+        ),
+    )
+    proposal = PlanProposal(
+        run_id=run.run_id,
+        plan_id="adaptive",
+        research_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+        exploration_boundary=ExplorationBoundary(
+            allowed_capabilities=(CapabilityKind.RAG_SEARCH,),
+            seeds=tuple(
+                SeedExplorationBoundary(
+                    task_id=spec.task_id,
+                    required_coverage=spec.required_capabilities,
+                    max_steps=4,
+                    max_directions=2,
+                    max_tokens=40,
+                )
+                for spec in specs
+            ),
+        ),
+        task_specs=specs,
+    )
+    with backend.unit_of_work() as uow:
+        uow.runs.save(run, expected_version=1)
+        uow.completion.save(run.run_id, contract)
+        validation = PlanValidator(SystemLimits()).validate(
+            proposal,
+            policy=run.policy,
+            allowed_capabilities=frozenset({CapabilityKind.RAG_SEARCH}),
+            completion=contract,
+        )
+        _plan, run = PlanAcceptor(uow, backend.clock, backend.idgen).accept(
+            run, proposal, validation
         )
         uow.commit()
     return run
@@ -129,6 +196,85 @@ def test_replan_rejects_non_research_add(backend) -> None:
                 backend.idgen,
             ).replan(run, proposal)
         uow.commit()
+
+
+@pytest.mark.integration
+def test_focused_replan_preserves_agent_mode_and_extends_seed_boundary(backend) -> None:
+    run = _seed_agent_loop_researching(backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="research_gap",
+        add_task_specs=(
+            TaskSpec(
+                task_id="a3",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap",
+                required_capabilities=(CapabilityKind.RAG_SEARCH,),
+            ),
+        ),
+    )
+    with backend.unit_of_work() as uow:
+        current = uow.runs.get(run.run_id)
+        plan, _new_run = ReplanService(
+            uow,
+            PlanValidator(SystemLimits()),
+            PlanAcceptor(uow, backend.clock, backend.idgen),
+            backend.clock,
+            backend.idgen,
+        ).replan(current, proposal)
+        uow.commit()
+
+    assert plan.graph.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+    assert plan.graph.exploration_boundary is not None
+    assert {seed.task_id for seed in plan.graph.exploration_boundary.seeds} == {
+        "a1",
+        "a2",
+        "a3",
+    }
+
+
+@pytest.mark.integration
+def test_focused_replan_revalidates_worst_case_against_remaining_run_budget(
+    backend,
+) -> None:
+    run = _seed_agent_loop_researching(backend)
+    proposal = ReplanProposal(
+        run_id=run.run_id,
+        reason="research_gap",
+        add_task_specs=(
+            TaskSpec(
+                task_id="a3",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="gap",
+                required_capabilities=(CapabilityKind.RAG_SEARCH,),
+            ),
+        ),
+    )
+    with backend.unit_of_work() as uow:
+        current = uow.runs.get(run.run_id)
+        budgeted = current.model_copy(update={"budget": Budget(max_tokens=100)})
+        uow.runs.save(budgeted, expected_version=current.state_version)
+        uow.commit()
+
+    with backend.unit_of_work() as uow:
+        current = uow.runs.get(run.run_id)
+        with pytest.raises(ValueError, match="seed token ceiling total"):
+            ReplanService(
+                uow,
+                PlanValidator(SystemLimits()),
+                PlanAcceptor(uow, backend.clock, backend.idgen),
+                backend.clock,
+                backend.idgen,
+            ).replan(current, proposal)
+        uow.commit()
+
+    with backend.unit_of_work() as uow:
+        persisted = uow.runs.get(run.run_id)
+        plan = uow.plans.current(run.run_id)
+        added = uow.tasks.get("a3")
+    assert persisted.current_plan_version == 1
+    assert plan.version == 1
+    assert added is None
 
 
 @pytest.mark.integration

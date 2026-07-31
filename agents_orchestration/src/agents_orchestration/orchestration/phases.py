@@ -40,7 +40,7 @@ from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.evidence import EvidenceSet
 from agents_orchestration.domain.execution import Run
 from agents_orchestration.domain.lifecycle import GateContinuationIntent
-from agents_orchestration.domain.plan import Plan
+from agents_orchestration.domain.plan import Plan, ResearchExecutionMode
 from agents_orchestration.domain.policy import SystemLimits
 from agents_orchestration.domain.state_machine import assert_run_transition
 from agents_orchestration.orchestration.coordinator import (
@@ -193,6 +193,7 @@ class PlanningPhaseHandler:
             policy=ctx.run.policy,
             allowed_capabilities=self.allowed_capabilities,
             completion=completion,
+            run_budget=ctx.run.budget,
         )
         if not validation.accepted:  # task 5.6: invalid proposal -> no Tasks
             return PhaseOutcome(
@@ -204,6 +205,7 @@ class PlanningPhaseHandler:
                 proposal=proposal,
             )
         if self.approval_required:  # task 5.9: open PLAN_APPROVAL before Tasks execute
+            graph = proposal.to_graph((ctx.run.current_plan_version or 0) + 1)
             return PhaseOutcome(
                 disposition=AdvanceDisposition.BLOCKED,
                 reason="plan-approval-required",
@@ -211,6 +213,8 @@ class PlanningPhaseHandler:
                 stage_logical_key="plan",
                 input_fingerprint=_fingerprint(ctx.run.state_version, ctx.run.current_plan_version),
                 proposal=proposal,
+                gate_artifact_hash=graph.approval_hash(),
+                gate_context=self._approval_context(graph),
             )
         return PhaseOutcome(
             disposition=AdvanceDisposition.PROGRESSED,
@@ -231,6 +235,7 @@ class PlanningPhaseHandler:
             policy=run.policy,
             allowed_capabilities=self.allowed_capabilities,
             completion=completion,
+            run_budget=run.budget,
         )
         if not validation.accepted or validation.graph is None:
             next_version = (run.current_plan_version or 0) + 1
@@ -244,9 +249,7 @@ class PlanningPhaseHandler:
         _plan, new_run = PlanAcceptor(uow, self.clock, self.idgen).accept(run, proposal, validation)
         return new_run
 
-    def persist_for_approval(
-        self, outcome: PhaseOutcome, run: Run, uow, now: datetime
-    ) -> None:
+    def persist_for_approval(self, outcome: PhaseOutcome, run: Run, uow, now: datetime) -> None:
         """Persist a validated proposal before opening its approval Gate."""
 
         proposal = outcome.proposal
@@ -258,6 +261,58 @@ class PlanningPhaseHandler:
                 proposed_at=now,
             )
         )
+
+    @staticmethod
+    def _approval_context(graph) -> dict[str, object]:
+        boundary = graph.exploration_boundary
+        seed_limits = (
+            {seed.task_id: seed for seed in boundary.seeds} if boundary is not None else {}
+        )
+        seeds = []
+        for spec in graph.task_specs:
+            limit = seed_limits.get(spec.task_id)
+            seeds.append(
+                {
+                    "task_id": spec.task_id,
+                    "description": spec.description,
+                    "required_coverage": [
+                        capability.value
+                        for capability in (
+                            limit.required_coverage
+                            if limit is not None
+                            else spec.required_capabilities
+                        )
+                    ],
+                    "max_steps": limit.max_steps if limit is not None else None,
+                    "max_directions": (limit.max_directions if limit is not None else None),
+                    "max_tokens": limit.max_tokens if limit is not None else None,
+                    "max_cost_usd": (
+                        str(limit.max_cost_usd)
+                        if limit is not None and limit.max_cost_usd is not None
+                        else None
+                    ),
+                }
+            )
+        return {
+            "schema_version": graph.schema_version,
+            "research_execution_mode": graph.research_execution_mode.value,
+            "allowed_capabilities": (
+                [capability.value for capability in boundary.allowed_capabilities]
+                if boundary is not None
+                else [
+                    capability.value
+                    for spec in graph.task_specs
+                    for capability in spec.required_capabilities
+                ]
+            ),
+            "seeds": seeds,
+            "fixed_downstream_lifecycle": [
+                "analyze",
+                "write",
+                "review",
+                "finalize",
+            ],
+        }
 
 
 class ResearchPhaseHandler:
@@ -287,6 +342,38 @@ class ResearchPhaseHandler:
                 for t in uow.tasks.by_run(ctx.run.run_id, plan_version=ctx.run.current_plan_version)
                 if t.worker_role is WorkerRole.EVIDENCE_RESEARCHER
             ]
+            plan = (
+                uow.plans.get(ctx.run.run_id, ctx.run.current_plan_version)
+                if ctx.run.current_plan_version is not None
+                else None
+            )
+            agent_loops_closed = True
+            if (
+                plan is not None
+                and plan.graph.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+            ):
+                loops = uow.research_loops.by_run(ctx.run.run_id, ctx.run.current_plan_version)
+                closed_seed_ids = {loop.task_id for loop in loops if loop.status.is_closed}
+                loop_seed_ids = {loop.task_id for loop in loops}
+                # A focused Replan carries accepted seed Tasks into Plan v+1
+                # without replaying their completed vN loops. Their accepted
+                # Attempt is the durable proof that the inherited seed is
+                # already closed. A current-version ACTIVE loop still wins and
+                # cannot be bypassed by merely marking its Task SUCCEEDED.
+                closed_seed_ids.update(
+                    task.task_id
+                    for task in tasks
+                    if task.task_id not in loop_seed_ids
+                    and task.state is TaskState.SUCCEEDED
+                    and task.accepted_attempt_id is not None
+                )
+                boundary = plan.graph.exploration_boundary
+                required_seed_ids = (
+                    {seed.task_id for seed in boundary.seeds} if boundary is not None else set()
+                )
+                agent_loops_closed = bool(required_seed_ids) and (
+                    closed_seed_ids == required_seed_ids
+                )
             uow.commit()
         if not tasks:
             return PhaseOutcome(
@@ -319,6 +406,13 @@ class ResearchPhaseHandler:
                 continue_immediately=not waiting,
             )
         if all(t.state is TaskState.SUCCEEDED for t in tasks):  # 6.8: Join
+            if not agent_loops_closed:
+                return PhaseOutcome(
+                    disposition=AdvanceDisposition.IDLE,
+                    reason="research-loops-not-closed",
+                    stage_logical_key="research",
+                    input_fingerprint=fp,
+                )
             evidences = await self.evidence_provider(ctx.run.run_id)
             evidence_set = EvidenceSet.join(
                 run_id=ctx.run.run_id,

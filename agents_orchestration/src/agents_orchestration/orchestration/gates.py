@@ -76,6 +76,7 @@ class GateService:
         artifact_hash: str | None = None,
         task_id: str | None = None,
         continuation: GateContinuation | None = None,
+        context: dict[str, object] | None = None,
     ) -> Gate:
         now = self.clock.now()
         gate = Gate(
@@ -92,6 +93,7 @@ class GateService:
             allowed_response_schema=canonical_response_schema(gate_type),
             expires_at=now + timedelta(seconds=ttl_seconds),
             continuation=continuation,
+            context=context or {},
         )
         self.uow.gates.save(gate)
         event = self._event(run, EffectType.GATE_OPENED, now, gate=gate)

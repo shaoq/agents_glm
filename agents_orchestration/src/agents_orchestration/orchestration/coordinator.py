@@ -99,6 +99,8 @@ class PhaseOutcome:
     gate_intent: GateContinuationIntent | None = None
     gate_feedback: str | None = None
     gate_correlation_id: str | None = None
+    gate_artifact_hash: str | None = None
+    gate_context: dict[str, object] | None = None
     failure_code: FailureCode | None = None
     proposal: object | None = None
     bump_revision: bool = False
@@ -442,6 +444,7 @@ class RunCoordinator:
             intent=outcome.gate_intent,
             feedback=outcome.gate_feedback,
             correlation_id=outcome.gate_correlation_id,
+            artifact_hash=outcome.gate_artifact_hash,
         )
         GateService(uow, self.backend.clock, self.backend.idgen).open(
             run,
@@ -449,6 +452,8 @@ class RunCoordinator:
             actor="system",
             role="orchestrator",
             scope=run.run_id,
+            artifact_hash=outcome.gate_artifact_hash,
+            context=outcome.gate_context,
             continuation=cont,
         )
 

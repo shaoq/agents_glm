@@ -21,6 +21,12 @@ from agents_orchestration.domain.execution import Attempt, Operation, Run, Task
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.lifecycle import Checkpoint, Gate, Lease
 from agents_orchestration.domain.plan import Dependency, Plan
+from agents_orchestration.domain.research_loop import (
+    ResearchDirection,
+    ResearchLoop,
+    ResearchStep,
+    ResearchStepStatus,
+)
 from agents_orchestration.runtime.persistence.mappers import dump, load
 from agents_orchestration.runtime.ports import ConcurrencyError, StaleVersionError
 
@@ -168,6 +174,15 @@ class SqlitePlanRepository:
         return load(Plan, row["data"]) if row else None
 
     def save(self, plan: Plan) -> None:
+        existing = self.get(plan.run_id, plan.version)
+        if existing is not None and (
+            existing.graph.research_execution_mode is not plan.graph.research_execution_mode
+            or existing.graph.exploration_boundary != plan.graph.exploration_boundary
+            or existing.graph.schema_version != plan.graph.schema_version
+        ):
+            raise ConcurrencyError(
+                f"Plan {plan.run_id}/v{plan.version} execution mode and boundary are immutable"
+            )
         self.conn.execute(
             "INSERT INTO plan_versions (run_id, version, acceptance, data) "
             "VALUES (?, ?, ?, ?) "
@@ -346,6 +361,185 @@ class SqliteOperationRepository:
     def by_attempt(self, attempt_id: str) -> list[Operation]:
         rows = self.conn.execute("SELECT data FROM operations WHERE attempt_id = ?", (attempt_id,))
         return [load(Operation, r["data"]) for r in rows]
+
+
+class SqliteResearchLoopRepository:
+    """CAS repository for one durable loop per Plan seed Task."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, loop_id: str) -> ResearchLoop | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_loops WHERE loop_id = ?", (loop_id,)
+        ).fetchone()
+        return load(ResearchLoop, row["data"]) if row else None
+
+    def for_task(self, run_id: str, plan_version: int, task_id: str) -> ResearchLoop | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_loops WHERE run_id = ? AND plan_version = ? AND task_id = ?",
+            (run_id, plan_version, task_id),
+        ).fetchone()
+        return load(ResearchLoop, row["data"]) if row else None
+
+    def by_run(self, run_id: str, plan_version: int) -> list[ResearchLoop]:
+        rows = self.conn.execute(
+            "SELECT data FROM research_loops WHERE run_id = ? AND plan_version = ? ORDER BY rowid",
+            (run_id, plan_version),
+        )
+        return [load(ResearchLoop, row["data"]) for row in rows]
+
+    def save(self, loop: ResearchLoop, expected_version: int | None) -> None:
+        if expected_version is None:
+            try:
+                self.conn.execute(
+                    "INSERT INTO research_loops "
+                    "(loop_id, run_id, plan_version, task_id, status, state_version, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        loop.loop_id,
+                        loop.run_id,
+                        loop.plan_version,
+                        loop.task_id,
+                        loop.status.value,
+                        loop.state_version,
+                        dump(loop),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConcurrencyError(f"research loop already exists: {loop.loop_id}") from exc
+            return
+        cur = self.conn.execute(
+            "UPDATE research_loops SET status = ?, state_version = ?, data = ? "
+            "WHERE loop_id = ? AND state_version = ?",
+            (
+                loop.status.value,
+                loop.state_version,
+                dump(loop),
+                loop.loop_id,
+                expected_version,
+            ),
+        )
+        if cur.rowcount == 0:
+            raise ConcurrencyError(
+                f"research loop CAS failed: {loop.loop_id} expected {expected_version}"
+            )
+
+
+class SqliteResearchDirectionRepository:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, direction_id: str) -> ResearchDirection | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_directions WHERE direction_id = ?", (direction_id,)
+        ).fetchone()
+        return load(ResearchDirection, row["data"]) if row else None
+
+    def by_loop(self, loop_id: str) -> list[ResearchDirection]:
+        rows = self.conn.execute(
+            "SELECT data FROM research_directions WHERE loop_id = ? ORDER BY rowid",
+            (loop_id,),
+        )
+        return [load(ResearchDirection, row["data"]) for row in rows]
+
+    def by_focus_hash(self, loop_id: str, focus_hash: str) -> ResearchDirection | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_directions WHERE loop_id = ? AND focus_hash = ?",
+            (loop_id, focus_hash),
+        ).fetchone()
+        return load(ResearchDirection, row["data"]) if row else None
+
+    def save(self, direction: ResearchDirection) -> None:
+        try:
+            self.conn.execute(
+                "INSERT INTO research_directions (direction_id, loop_id, focus_hash, data) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    direction.direction_id,
+                    direction.loop_id,
+                    direction.focus_hash,
+                    dump(direction),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ConcurrencyError(
+                f"research direction focus hash already exists: "
+                f"{direction.loop_id}/{direction.focus_hash}"
+            ) from exc
+
+
+class SqliteResearchStepRepository:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, step_id: str) -> ResearchStep | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_steps WHERE step_id = ?", (step_id,)
+        ).fetchone()
+        return load(ResearchStep, row["data"]) if row else None
+
+    def by_loop(self, loop_id: str) -> list[ResearchStep]:
+        rows = self.conn.execute(
+            "SELECT data FROM research_steps WHERE loop_id = ? ORDER BY step_index",
+            (loop_id,),
+        )
+        return [load(ResearchStep, row["data"]) for row in rows]
+
+    def active_for_task(self, run_id: str, plan_version: int, task_id: str) -> ResearchStep | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_steps "
+            "WHERE run_id = ? AND plan_version = ? AND task_id = ? "
+            "AND status IN ('deciding', 'prepared') ORDER BY step_index DESC LIMIT 1",
+            (run_id, plan_version, task_id),
+        ).fetchone()
+        return load(ResearchStep, row["data"]) if row else None
+
+    def by_logical_key(
+        self, run_id: str, plan_version: int, task_id: str, step_index: int
+    ) -> ResearchStep | None:
+        row = self.conn.execute(
+            "SELECT data FROM research_steps "
+            "WHERE run_id = ? AND plan_version = ? AND task_id = ? AND step_index = ?",
+            (run_id, plan_version, task_id, step_index),
+        ).fetchone()
+        return load(ResearchStep, row["data"]) if row else None
+
+    def save(self, step: ResearchStep, expected_status: ResearchStepStatus | None) -> None:
+        if expected_status is None:
+            try:
+                self.conn.execute(
+                    "INSERT INTO research_steps "
+                    "(step_id, loop_id, run_id, plan_version, task_id, step_index, status, "
+                    "decision_request_id, capability_request_id, data) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        step.step_id,
+                        step.loop_id,
+                        step.run_id,
+                        step.plan_version,
+                        step.task_id,
+                        step.step_index,
+                        step.status.value,
+                        step.decision_request_id,
+                        step.capability_request_id,
+                        dump(step),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ConcurrencyError(
+                    "logical research step or request id already exists: "
+                    f"{step.run_id}/{step.plan_version}/{step.task_id}/{step.step_index}"
+                ) from exc
+            return
+        cur = self.conn.execute(
+            "UPDATE research_steps SET status = ?, data = ? WHERE step_id = ? AND status = ?",
+            (step.status.value, dump(step), step.step_id, expected_status.value),
+        )
+        if cur.rowcount == 0:
+            raise ConcurrencyError(
+                f"research step CAS failed: {step.step_id} expected {expected_status.value}"
+            )
 
 
 class SqliteEventStore:

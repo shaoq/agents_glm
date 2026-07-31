@@ -12,8 +12,14 @@ from agents_orchestration.domain.goal import (
     CriterionKind,
     GoalSpec,
 )
-from agents_orchestration.domain.plan import Dependency, TaskSpec
-from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+from agents_orchestration.domain.plan import (
+    Dependency,
+    ExplorationBoundary,
+    ResearchExecutionMode,
+    SeedExplorationBoundary,
+    TaskSpec,
+)
+from agents_orchestration.domain.policy import Budget, RunPolicy, SystemLimits
 from agents_orchestration.orchestration.goal import GoalService
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
 from agents_orchestration.orchestration.proposals import PlanProposal, ReplanProposal
@@ -54,6 +60,29 @@ def _proposal(task_ids=("t1",), deps=()) -> PlanProposal:
         task_specs=specs,
         dependencies=tuple(deps),
         deliverable_paths=("report.md",),
+    )
+
+
+def _agent_loop_proposal(*, task_ids=("t1",), allowed=ALLOWED) -> PlanProposal:
+    specs = tuple(_research_spec(tid) for tid in task_ids)
+    return PlanProposal(
+        run_id="r1",
+        plan_id="loop-plan",
+        research_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+        exploration_boundary=ExplorationBoundary(
+            allowed_capabilities=tuple(allowed),
+            seeds=tuple(
+                SeedExplorationBoundary(
+                    task_id=tid,
+                    required_coverage=(CapabilityKind.RAG_SEARCH,),
+                    max_steps=4,
+                    max_directions=2,
+                    max_tokens=500,
+                )
+                for tid in task_ids
+            ),
+        ),
+        task_specs=specs,
     )
 
 
@@ -126,6 +155,95 @@ def test_validator_rejects_cycle_and_unsupported_capability(backend, fake_clock)
         )
     assert not cyc.accepted and any("cycle" in d for d in cyc.diagnostics)
     assert not unsup.accepted and any("unsupported capability" in d for d in unsup.diagnostics)
+
+
+@pytest.mark.integration
+def test_agent_loop_validator_accepts_explicit_seed_boundary(backend, fake_clock) -> None:
+    _run_planning(backend, fake_clock)
+    proposal = _agent_loop_proposal(task_ids=("t1", "t2"))
+    with backend.unit_of_work() as uow:
+        run = uow.runs.get("r1")
+        result = PlanValidator(SystemLimits()).validate(
+            proposal,
+            policy=run.policy,
+            allowed_capabilities=ALLOWED,
+            completion=_completion(),
+            run_budget=Budget(max_tokens=1_000),
+        )
+
+    assert result.accepted
+    assert result.graph is not None
+    assert result.graph.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+    assert result.graph.exploration_boundary == proposal.exploration_boundary
+
+
+@pytest.mark.integration
+def test_agent_loop_validator_rejects_seed_and_budget_mismatch(backend, fake_clock) -> None:
+    _run_planning(backend, fake_clock)
+    proposal = _agent_loop_proposal(task_ids=("t1", "t2"))
+    mismatched = proposal.model_copy(
+        update={
+            "exploration_boundary": ExplorationBoundary(
+                allowed_capabilities=(CapabilityKind.RAG_SEARCH,),
+                seeds=(
+                    SeedExplorationBoundary(
+                        task_id="t1",
+                        required_coverage=(CapabilityKind.RAG_SEARCH,),
+                        max_steps=4,
+                        max_directions=2,
+                        max_tokens=500,
+                    ),
+                ),
+            )
+        }
+    )
+    with backend.unit_of_work() as uow:
+        run = uow.runs.get("r1")
+        result = PlanValidator(SystemLimits()).validate(
+            mismatched,
+            policy=run.policy,
+            allowed_capabilities=ALLOWED,
+            completion=_completion(),
+            run_budget=Budget(max_tokens=499),
+        )
+
+    assert not result.accepted
+    assert any("seed boundary" in diagnostic for diagnostic in result.diagnostics)
+    assert any("token ceiling" in diagnostic for diagnostic in result.diagnostics)
+
+
+@pytest.mark.integration
+def test_agent_loop_validator_rejects_boundary_above_policy_before_accept(
+    backend, fake_clock
+) -> None:
+    _run_planning(backend, fake_clock)
+    proposal = _agent_loop_proposal()
+    too_large = proposal.model_copy(
+        update={
+            "exploration_boundary": ExplorationBoundary(
+                allowed_capabilities=(CapabilityKind.RAG_SEARCH,),
+                seeds=(
+                    SeedExplorationBoundary(
+                        task_id="t1",
+                        required_coverage=(CapabilityKind.RAG_SEARCH,),
+                        max_steps=SystemLimits().max_research_steps_per_seed + 1,
+                        max_directions=2,
+                    ),
+                ),
+            )
+        }
+    )
+    with backend.unit_of_work() as uow:
+        run = uow.runs.get("r1")
+        result = PlanValidator(SystemLimits()).validate(
+            too_large,
+            policy=run.policy,
+            allowed_capabilities=ALLOWED,
+            completion=_completion(),
+        )
+
+    assert not result.accepted
+    assert any("max_steps" in diagnostic for diagnostic in result.diagnostics)
 
 
 @pytest.mark.integration

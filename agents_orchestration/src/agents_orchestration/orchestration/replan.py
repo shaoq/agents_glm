@@ -18,7 +18,15 @@ from __future__ import annotations
 from agents_orchestration.domain.enums import EffectType, RunState, TaskState, WorkerRole
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
-from agents_orchestration.domain.plan import Dependency, Plan, PlanGraph, TaskSpec
+from agents_orchestration.domain.plan import (
+    Dependency,
+    ExplorationBoundary,
+    Plan,
+    PlanGraph,
+    ResearchExecutionMode,
+    SeedExplorationBoundary,
+    TaskSpec,
+)
 from agents_orchestration.domain.state_machine import assert_run_transition
 from agents_orchestration.orchestration.planner import PlanAcceptor, PlanValidator
 from agents_orchestration.orchestration.proposals import PlanProposal, ReplanProposal
@@ -49,6 +57,7 @@ class ReplanService:
         proposal: ReplanProposal,
     ) -> tuple[Plan, Run]:
         now = self.clock.now()
+        self._validate_candidate(run, proposal)
         plan, preserved_ids, invalidate, next_version, _added = self._persist_replan_graph(
             run, proposal, now
         )
@@ -163,9 +172,7 @@ class ReplanService:
         """Validate the complete Plan v+1 graph before the first repository write."""
 
         if proposal.run_id != run.run_id:
-            raise ValueError(
-                f"replan run_id {proposal.run_id} does not match Run {run.run_id}"
-            )
+            raise ValueError(f"replan run_id {proposal.run_id} does not match Run {run.run_id}")
         current = self.uow.plans.current(run.run_id)
         if current is None:
             raise ValueError(f"Run {run.run_id} has no plan to replan")
@@ -175,8 +182,7 @@ class ReplanService:
         preserved_specs = tuple(
             self._to_spec(task)
             for task in current_tasks
-            if task.task_id not in invalidate
-            and task.worker_role is WorkerRole.EVIDENCE_RESEARCHER
+            if task.task_id not in invalidate and task.worker_role is WorkerRole.EVIDENCE_RESEARCHER
         )
         candidate_specs = preserved_specs + tuple(proposal.add_task_specs)
         task_ids = [spec.task_id for spec in candidate_specs]
@@ -197,6 +203,9 @@ class ReplanService:
         candidate = PlanProposal(
             run_id=run.run_id,
             plan_id=current.graph.plan_id,
+            schema_version=current.graph.schema_version,
+            research_execution_mode=current.graph.research_execution_mode,
+            exploration_boundary=self._replanned_boundary(current.graph, candidate_specs),
             task_specs=candidate_specs,
             dependencies=candidate_dependencies,
             deliverable_paths=current.graph.deliverable_paths,
@@ -204,10 +213,14 @@ class ReplanService:
         completion = run.completion or self.uow.completion.get(run.run_id)
         if completion is None:
             raise ValueError(f"Run {run.run_id} has no CompletionContract")
-        approved_capabilities = frozenset(
-            capability
-            for spec in current.graph.task_specs
-            for capability in spec.required_capabilities
+        approved_capabilities = (
+            frozenset(current.graph.exploration_boundary.allowed_capabilities)
+            if current.graph.exploration_boundary is not None
+            else frozenset(
+                capability
+                for spec in current.graph.task_specs
+                for capability in spec.required_capabilities
+            )
         )
         validation = self.validator.validate(
             candidate,
@@ -215,11 +228,10 @@ class ReplanService:
             allowed_capabilities=approved_capabilities,
             completion=completion,
             version=current.version + 1,
+            run_budget=run.budget,
         )
         if not validation.accepted:
-            raise ValueError(
-                "invalid focused replan: " + "; ".join(validation.diagnostics)
-            )
+            raise ValueError("invalid focused replan: " + "; ".join(validation.diagnostics))
 
     # --- shared plan persistence (no Run/event side effects) ----------------
 
@@ -302,6 +314,9 @@ class ReplanService:
 
         graph = PlanGraph(
             plan_id=current.graph.plan_id,
+            schema_version=current.graph.schema_version,
+            research_execution_mode=current.graph.research_execution_mode,
+            exploration_boundary=self._replanned_boundary(current.graph, all_specs),
             version=next_version,
             task_specs=all_specs,
             dependencies=tuple(all_deps),
@@ -312,6 +327,40 @@ class ReplanService:
         self.uow.plans.save(current.supersede(next_version))
         added_ids = [s.task_id for s in proposal.add_task_specs]
         return plan, preserved_ids, invalidate, next_version, added_ids
+
+    @staticmethod
+    def _replanned_boundary(
+        current: PlanGraph, specs: tuple[TaskSpec, ...]
+    ) -> ExplorationBoundary | None:
+        """Carry the persisted consumer and extend its per-seed formal boundary."""
+
+        if current.research_execution_mode is ResearchExecutionMode.FIXED_FANOUT:
+            return None
+        boundary = current.exploration_boundary
+        if boundary is None:
+            raise ValueError("agent_loop Plan is missing its exploration boundary")
+        existing = {seed.task_id: seed for seed in boundary.seeds}
+        template = boundary.seeds[0]
+        seeds = []
+        for spec in specs:
+            prior = existing.get(spec.task_id)
+            seeds.append(
+                prior
+                if prior is not None
+                else SeedExplorationBoundary(
+                    task_id=spec.task_id,
+                    required_coverage=spec.required_capabilities,
+                    max_steps=template.max_steps,
+                    max_directions=template.max_directions,
+                    max_tokens=template.max_tokens,
+                    max_cost_usd=template.max_cost_usd,
+                )
+            )
+        return ExplorationBoundary(
+            schema_version=boundary.schema_version,
+            allowed_capabilities=boundary.allowed_capabilities,
+            seeds=tuple(seeds),
+        )
 
     @staticmethod
     def _depends_on_edges(specs: tuple[TaskSpec, ...]) -> tuple[Dependency, ...]:

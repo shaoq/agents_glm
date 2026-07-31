@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS operations (
     data             TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_operations_attempt ON operations (attempt_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_operations_dedup_request
+    ON operations (dedup_request_id);
 
 CREATE TABLE IF NOT EXISTS gates (
     gate_id TEXT PRIMARY KEY,
@@ -171,6 +173,47 @@ CREATE TABLE IF NOT EXISTS evidence (
     PRIMARY KEY (run_id, evidence_id)
 );
 CREATE INDEX IF NOT EXISTS ix_evidence_run ON evidence (run_id);
+
+CREATE TABLE IF NOT EXISTS research_loops (
+    loop_id        TEXT PRIMARY KEY,
+    run_id         TEXT NOT NULL,
+    plan_version   INTEGER NOT NULL,
+    task_id        TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    state_version  INTEGER NOT NULL,
+    data           TEXT NOT NULL,
+    UNIQUE (run_id, plan_version, task_id)
+);
+CREATE INDEX IF NOT EXISTS ix_research_loops_run
+    ON research_loops (run_id, plan_version, status);
+
+CREATE TABLE IF NOT EXISTS research_directions (
+    direction_id TEXT PRIMARY KEY,
+    loop_id      TEXT NOT NULL,
+    focus_hash   TEXT NOT NULL,
+    data         TEXT NOT NULL,
+    UNIQUE (loop_id, focus_hash)
+);
+CREATE INDEX IF NOT EXISTS ix_research_directions_loop
+    ON research_directions (loop_id);
+
+CREATE TABLE IF NOT EXISTS research_steps (
+    step_id               TEXT PRIMARY KEY,
+    loop_id               TEXT NOT NULL,
+    run_id                TEXT NOT NULL,
+    plan_version          INTEGER NOT NULL,
+    task_id               TEXT NOT NULL,
+    step_index            INTEGER NOT NULL,
+    status                TEXT NOT NULL,
+    decision_request_id   TEXT NOT NULL UNIQUE,
+    capability_request_id TEXT NOT NULL UNIQUE,
+    data                  TEXT NOT NULL,
+    UNIQUE (run_id, plan_version, task_id, step_index)
+);
+CREATE INDEX IF NOT EXISTS ix_research_steps_loop
+    ON research_steps (loop_id, step_index);
+CREATE INDEX IF NOT EXISTS ix_research_steps_active
+    ON research_steps (run_id, plan_version, task_id, status);
 """
 
 

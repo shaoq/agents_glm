@@ -52,6 +52,8 @@ def build_production_coordinator(
     analysis_artifact_store=None,
     sufficiency_reviewer=None,
     focused_replan_builder=None,
+    agent_loop_executor=None,
+    reasoning_reservation_tokens: int = 256,
     limits: SystemLimits | None = None,
     approval_required: bool = False,
 ) -> RunCoordinator:
@@ -92,7 +94,13 @@ def build_production_coordinator(
             f"production composition incomplete — missing required ports: {missing}"
         )
     sys_limits = limits or SystemLimits()
-    tick = RuntimeTick(backend, executor=executor, limits=sys_limits)
+    tick = RuntimeTick(
+        backend,
+        executor=executor,
+        agent_loop_executor=agent_loop_executor,
+        limits=sys_limits,
+        reasoning_reservation_tokens=reasoning_reservation_tokens,
+    )
     handlers = {
         GoalPhaseHandler.phase: GoalPhaseHandler(normalizer, backend.idgen),
         PlanningPhaseHandler.phase: PlanningPhaseHandler(
@@ -179,6 +187,7 @@ def build_production_coordinator_from_settings(
         LLMPlanner,
         LLMReportReviewer,
         LLMReportWriter,
+        LLMResearchAgent,
     )
     from agents_orchestration.workers.executor import WorkerExecutor
     from agents_orchestration.workers.registry import WorkerRegistry
@@ -195,7 +204,16 @@ def build_production_coordinator_from_settings(
     policy = settings.build_run_policy()
 
     normalizer = LLMGoalNormalizer(adapter, idgen)
-    planner = LLMPlanner(adapter, idgen, web_enabled=policy.web_enabled)
+    planner = LLMPlanner(
+        adapter,
+        idgen,
+        web_enabled=policy.web_enabled,
+        default_execution_mode=settings.research_execution_mode,
+        max_steps_per_seed=policy.max_research_steps_per_seed,
+        max_directions_per_seed=policy.max_research_directions_per_seed,
+        max_tokens_per_seed=policy.max_research_tokens_per_seed,
+        max_cost_usd_per_seed=policy.max_research_cost_usd_per_seed,
+    )
     analyst = LLMAnalyst(adapter, idgen)
     writer = LLMReportWriter(adapter, idgen)
     reviewer = LLMReportReviewer(adapter, idgen)
@@ -217,6 +235,20 @@ def build_production_coordinator_from_settings(
         WorkerRole.EVIDENCE_RESEARCHER: research_handler,
     }
     executor = WorkerExecutor(workers, router, handlers, policy)
+    from agents_orchestration.orchestration.research_agent_loop import (
+        ActionValidator,
+        ResearchAgentLoopExecutor,
+        ResearchDirectionPolicy,
+    )
+
+    agent_loop_executor = ResearchAgentLoopExecutor(
+        agent=LLMResearchAgent(adapter),
+        validator=ActionValidator(),
+        direction_policy=ResearchDirectionPolicy(registry.allowed_kinds()),
+        registry=registry,
+        router=router,
+        worker=workers.get(WorkerRole.EVIDENCE_RESEARCHER),
+    )
 
     from agents_orchestration.orchestration.analysis_artifact import (
         MissingAcceptedAnalysisError,
@@ -281,6 +313,8 @@ def build_production_coordinator_from_settings(
         analysis_artifact_store=analysis_artifact_store,
         sufficiency_reviewer=sufficiency_reviewer,
         focused_replan_builder=focused_replan_builder,
+        agent_loop_executor=agent_loop_executor,
+        reasoning_reservation_tokens=settings.research_reasoning_reservation_tokens,
         limits=limits,
     )
 

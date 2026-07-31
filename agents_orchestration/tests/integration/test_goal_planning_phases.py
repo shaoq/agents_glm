@@ -16,9 +16,16 @@ from agents_orchestration.domain.goal import (
     CriterionKind,
     GoalSpec,
 )
-from agents_orchestration.domain.plan import PlanAcceptance, TaskSpec
+from agents_orchestration.domain.plan import (
+    ExplorationBoundary,
+    PlanAcceptance,
+    ResearchExecutionMode,
+    SeedExplorationBoundary,
+    TaskSpec,
+)
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 from agents_orchestration.orchestration.coordinator import RunCoordinator
+from agents_orchestration.orchestration.gates import GateContinuationError
 from agents_orchestration.orchestration.phases import GoalPhaseHandler, PlanningPhaseHandler
 from agents_orchestration.orchestration.proposals import (
     GoalClarificationProposal,
@@ -76,6 +83,34 @@ def _valid_proposal(run_id: str) -> PlanProposal:
             ),
         ),
         deliverable_paths=("report.md",),
+    )
+
+
+def _agent_loop_proposal(run_id: str) -> PlanProposal:
+    return PlanProposal(
+        run_id=run_id,
+        plan_id="loop-plan",
+        research_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+        exploration_boundary=ExplorationBoundary(
+            allowed_capabilities=(CapabilityKind.RAG_SEARCH,),
+            seeds=(
+                SeedExplorationBoundary(
+                    task_id="seed-1",
+                    required_coverage=(CapabilityKind.RAG_SEARCH,),
+                    max_steps=5,
+                    max_directions=2,
+                    max_tokens=1_000,
+                ),
+            ),
+        ),
+        task_specs=(
+            TaskSpec(
+                task_id="seed-1",
+                worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                description="adaptive seed",
+                required_capabilities=(CapabilityKind.RAG_SEARCH,),
+            ),
+        ),
     )
 
 
@@ -274,6 +309,95 @@ async def test_plan_approval_accepts_pending_plan_and_materializes_tasks(backend
         assert accepted.acceptance is PlanAcceptance.ACCEPTED
         assert uow.tasks.get("t1") is not None
         uow.rollback()
+
+
+@pytest.mark.integration
+async def test_agent_loop_plan_approval_binds_boundary_hash_and_restores_mode(
+    backend,
+) -> None:
+    run = _seed_planning(backend)
+    handler = PlanningPhaseHandler(
+        _Planner(_agent_loop_proposal(run.run_id)),
+        limits=SystemLimits(),
+        allowed_capabilities=ALL_CAPS,
+        clock=backend.clock,
+        idgen=backend.idgen,
+        approval_required=True,
+    )
+    service = OrchestrationService(
+        backend, coordinator=RunCoordinator(backend, {PhaseId.PLAN: handler})
+    )
+
+    await service.advance_run(run.run_id)
+    with backend.unit_of_work() as uow:
+        gate = next(iter(uow.gates.open_for_run(run.run_id)))
+        pending = uow.plans.current(run.run_id)
+        assert gate.artifact_hash == pending.graph.approval_hash()
+        assert gate.continuation.bound_artifact_hash == gate.artifact_hash
+        assert gate.context["research_execution_mode"] == "agent_loop"
+        assert gate.context["seeds"][0]["task_id"] == "seed-1"
+        assert gate.context["seeds"][0]["max_steps"] == 5
+        assert gate.context["fixed_downstream_lifecycle"] == [
+            "analyze",
+            "write",
+            "review",
+            "finalize",
+        ]
+        gate_id = gate.gate_id
+
+    service.respond_gate(
+        gate_id,
+        request_id="approve-loop",
+        actor="approver",
+        role="orchestrator",
+        payload={"outcome": "approved"},
+    )
+
+    with backend.unit_of_work() as uow:
+        accepted = uow.plans.current(run.run_id)
+        task = uow.tasks.get("seed-1")
+    assert accepted.graph.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+    assert accepted.graph.exploration_boundary is not None
+    assert task is not None
+
+
+@pytest.mark.integration
+async def test_plan_approval_invalidates_when_candidate_boundary_changes(backend) -> None:
+    run = _seed_planning(backend)
+    proposal = _agent_loop_proposal(run.run_id)
+    handler = PlanningPhaseHandler(
+        _Planner(proposal),
+        limits=SystemLimits(),
+        allowed_capabilities=ALL_CAPS,
+        clock=backend.clock,
+        idgen=backend.idgen,
+        approval_required=True,
+    )
+    service = OrchestrationService(
+        backend, coordinator=RunCoordinator(backend, {PhaseId.PLAN: handler})
+    )
+    await service.advance_run(run.run_id)
+    with backend.unit_of_work() as uow:
+        gate = next(iter(uow.gates.open_for_run(run.run_id)))
+        changed = proposal.model_copy(update={"plan_id": "changed-boundary-plan"}).to_graph(2)
+        from agents_orchestration.domain.plan import Plan
+
+        uow.plans.save(Plan(run_id=run.run_id, graph=changed, proposed_at=NOW))
+        uow.commit()
+
+    with pytest.raises(GateContinuationError, match="candidate artifact drifted"):
+        service.respond_gate(
+            gate.gate_id,
+            request_id="stale-approval",
+            actor="approver",
+            role="orchestrator",
+            payload={"outcome": "approved"},
+        )
+
+    with backend.unit_of_work() as uow:
+        canceled = uow.gates.get(gate.gate_id)
+        assert canceled.state.value == "canceled"
+        assert uow.tasks.get("seed-1") is None
 
 
 # --- task 4.1 / 4.3: effective goal context flows into normalization -------

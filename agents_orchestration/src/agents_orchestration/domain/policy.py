@@ -25,6 +25,10 @@ class SystemLimits(BaseModel):
     max_attempts_per_task: int = Field(default=3, ge=1)
     max_replans: int = Field(default=2, ge=0)
     max_report_revisions: int = Field(default=2, ge=0)
+    max_research_steps_per_seed: int = Field(default=12, ge=1)
+    max_research_directions_per_seed: int = Field(default=6, ge=1)
+    max_research_tokens_per_seed: int = Field(default=100_000, ge=0)
+    max_research_cost_usd_per_seed: Decimal = Field(default=Decimal("100"), ge=Decimal("0"))
     default_run_deadline_seconds: int = Field(default=1800, gt=0)
 
 
@@ -40,6 +44,10 @@ class RunPolicy(BaseModel):
     max_attempts_per_task: int = Field(ge=1)
     max_replans: int = Field(ge=0)
     max_report_revisions: int = Field(ge=0)
+    max_research_steps_per_seed: int = Field(ge=1)
+    max_research_directions_per_seed: int = Field(ge=1)
+    max_research_tokens_per_seed: int = Field(ge=0)
+    max_research_cost_usd_per_seed: Decimal = Field(ge=Decimal("0"))
     web_enabled: bool = False
     web_allowed_domains: tuple[str, ...] = Field(default_factory=tuple)
 
@@ -55,6 +63,10 @@ class RunPolicy(BaseModel):
             "max_attempts_per_task": limits.max_attempts_per_task,
             "max_replans": limits.max_replans,
             "max_report_revisions": limits.max_report_revisions,
+            "max_research_steps_per_seed": limits.max_research_steps_per_seed,
+            "max_research_directions_per_seed": limits.max_research_directions_per_seed,
+            "max_research_tokens_per_seed": limits.max_research_tokens_per_seed,
+            "max_research_cost_usd_per_seed": limits.max_research_cost_usd_per_seed,
         }
         base.update(overrides)
         return cls(**base)  # type: ignore[arg-type]
@@ -70,6 +82,10 @@ class RunPolicy(BaseModel):
             and self.max_attempts_per_task <= limits.max_attempts_per_task
             and self.max_replans <= limits.max_replans
             and self.max_report_revisions <= limits.max_report_revisions
+            and self.max_research_steps_per_seed <= limits.max_research_steps_per_seed
+            and self.max_research_directions_per_seed <= limits.max_research_directions_per_seed
+            and self.max_research_tokens_per_seed <= limits.max_research_tokens_per_seed
+            and self.max_research_cost_usd_per_seed <= limits.max_research_cost_usd_per_seed
         )
 
 
@@ -105,8 +121,9 @@ class Budget(BaseModel):
         """Return a new Budget with ``tokens`` / ``cost_usd`` consumed."""
 
         cost = cost_usd if isinstance(cost_usd, Decimal) else Decimal(str(cost_usd))
-        return self.model_copy(
-            update={
+        return Budget.model_validate(
+            {
+                **self.model_dump(),
                 "tokens_used": self.tokens_used + tokens,
                 "cost_usd_used": self.cost_usd_used + cost,
             }

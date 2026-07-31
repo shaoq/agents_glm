@@ -65,7 +65,7 @@ def _make_run(run_id: str = "run-old") -> Run:
 @pytest.mark.integration
 def test_fresh_database_has_stage_executions_schema(tmp_path) -> None:
     backend = SqliteBackend(tmp_path / "rt.sqlite", tmp_path / "arts")
-    assert schema_mod.schema_version(backend.conn) == 2
+    assert schema_mod.schema_version(backend.conn) == 3
     cols = {r["name"] for r in backend.conn.execute("PRAGMA table_info(stage_executions)")}
     assert {
         "stage_execution_id",
@@ -103,9 +103,9 @@ def test_upgrade_from_v1_preserves_run_history(tmp_path) -> None:
     conn.commit()
     conn.close()
 
-    # Opening with current code runs additive initialize -> schema_version 2.
+    # Opening with current code runs additive initialize -> schema_version 3.
     backend = SqliteBackend(db, tmp_path / "arts")
-    assert schema_mod.schema_version(backend.conn) == 2
+    assert schema_mod.schema_version(backend.conn) == 3
     with backend.unit_of_work() as uow:
         assert uow.runs.get("run-old").run_id == "run-old"  # history preserved
         # stage_executions table now usable

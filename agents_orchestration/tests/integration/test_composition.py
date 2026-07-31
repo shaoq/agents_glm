@@ -95,6 +95,22 @@ async def test_settings_composition_preserves_required_research_for_empty_eviden
 
 
 @pytest.mark.integration
+def test_settings_composition_wires_research_reasoning_reservation(backend) -> None:
+    from agents_orchestration.config import Settings
+    from agents_orchestration.domain.coordination import PhaseId
+    from agents_orchestration.orchestration.composition import (
+        build_production_coordinator_from_settings,
+    )
+
+    coordinator = build_production_coordinator_from_settings(
+        backend,
+        Settings(research_reasoning_reservation_tokens=321),
+    )
+
+    assert coordinator.handlers[PhaseId.RESEARCH].tick.reasoning_reservation_tokens == 321
+
+
+@pytest.mark.integration
 def test_production_composition_rejects_incomplete(backend) -> None:
     """Task 9.8: a production profile with a missing required port must fail
     loudly rather than silently substituting a Fake."""

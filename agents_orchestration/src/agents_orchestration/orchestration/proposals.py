@@ -15,7 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.ids import RunId
-from agents_orchestration.domain.plan import Dependency, TaskSpec
+from agents_orchestration.domain.plan import (
+    Dependency,
+    ExplorationBoundary,
+    ResearchExecutionMode,
+    TaskSpec,
+)
 
 
 class GoalClarificationProposal(BaseModel):
@@ -40,6 +45,9 @@ class PlanProposal(BaseModel):
 
     run_id: RunId
     plan_id: str
+    schema_version: int = Field(default=1, ge=1)
+    research_execution_mode: ResearchExecutionMode = ResearchExecutionMode.FIXED_FANOUT
+    exploration_boundary: ExplorationBoundary | None = None
     task_specs: tuple[TaskSpec, ...] = Field(default_factory=tuple)
     dependencies: tuple[Dependency, ...] = Field(default_factory=tuple)
     deliverable_paths: tuple[str, ...] = Field(default_factory=tuple)
@@ -49,6 +57,9 @@ class PlanProposal(BaseModel):
 
         return PlanGraph(
             plan_id=self.plan_id,
+            schema_version=self.schema_version,
+            research_execution_mode=self.research_execution_mode,
+            exploration_boundary=self.exploration_boundary,
             version=version,
             task_specs=self.task_specs,
             dependencies=self.dependencies,

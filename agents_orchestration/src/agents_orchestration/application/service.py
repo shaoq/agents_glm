@@ -180,6 +180,51 @@ class OrchestrationService:
         with self.backend.unit_of_work() as uow:
             return uow.runs.get(run_id)
 
+    def research_status(self, run_id: str) -> dict[str, object]:
+        """Safe control-surface projection of persisted Plan/loop progress."""
+
+        with self.backend.unit_of_work() as uow:
+            run = uow.runs.get(run_id)
+            if run is None:
+                raise KeyError(run_id)
+            plan = (
+                uow.plans.get(run_id, run.current_plan_version)
+                if run.current_plan_version is not None
+                else uow.plans.current(run_id)
+            )
+            if plan is None:
+                return {
+                    "execution_mode": None,
+                    "plan_schema_version": None,
+                    "boundary": None,
+                    "loops": [],
+                }
+            loops = uow.research_loops.by_run(run_id, plan.version)
+            return {
+                "execution_mode": plan.graph.research_execution_mode.value,
+                "plan_schema_version": plan.graph.schema_version,
+                "boundary": (
+                    plan.graph.exploration_boundary.model_dump(mode="json")
+                    if plan.graph.exploration_boundary is not None
+                    else None
+                ),
+                "loops": [
+                    {
+                        "loop_id": loop.loop_id,
+                        "task_id": loop.task_id,
+                        "status": loop.status.value,
+                        "next_step_index": loop.next_step_index,
+                        "step_count": loop.step_count,
+                        "direction_count": loop.direction_count,
+                        "coverage": [capability.value for capability in loop.coverage],
+                        "accepted_evidence_count": len(loop.accepted_evidence_ids),
+                        "usage": loop.usage.model_dump(mode="json"),
+                        "degradation_reason": loop.degradation_reason,
+                    }
+                    for loop in loops
+                ],
+            }
+
     def pause_run(self, run_id: str, *, expected_version: int) -> Run:
         """Transition to PAUSED and persist the safe continuation point (the
         phase the Run was paused from) so resume restores it deterministically
@@ -323,9 +368,7 @@ class OrchestrationService:
         with self.backend.unit_of_work() as uow:
             return list(uow.gates.open_for_run(run_id))
 
-    def respond_gate(
-        self, gate_id: str, *, request_id: str, actor: str, role: str, payload: dict
-    ):
+    def respond_gate(self, gate_id: str, *, request_id: str, actor: str, role: str, payload: dict):
         """Atomically consume a typed Gate response (tasks 3.1-3.4).
 
         Loads Gate + Run, validates the typed payload and claims the Request ID,
@@ -351,6 +394,35 @@ class OrchestrationService:
                 raise KeyError(gate.run_id)
             original_version = run.state_version
             svc = GateService(uow, self.backend.clock, self.backend.idgen)
+            if gate.gate_type is GateType.PLAN_APPROVAL and gate.artifact_hash:
+                candidate = uow.plans.current(run.run_id)
+                candidate_hash = candidate.graph.approval_hash() if candidate is not None else None
+                if candidate_hash != gate.artifact_hash:
+                    now = self.backend.clock.now()
+                    uow.gates.save(gate.cancel())
+                    uow.events.append(
+                        [
+                            DomainEvent(
+                                event_id=self.backend.idgen.new_id("evt"),
+                                run_id=run.run_id,
+                                effect=EffectType.GATE_INVALIDATED,
+                                state_version=run.state_version,
+                                occurred_at=now,
+                                gate_id=gate.gate_id,
+                                plan_version=gate.plan_version,
+                                payload={
+                                    "gate_type": gate.gate_type.value,
+                                    "reason": "candidate_artifact_drifted",
+                                    "approved_artifact_hash": gate.artifact_hash,
+                                    "current_artifact_hash": candidate_hash,
+                                },
+                            )
+                        ]
+                    )
+                    uow.commit()
+                    raise GateContinuationError(
+                        f"gate {gate.gate_id} invalidated: candidate artifact drifted"
+                    )
             validated = svc.validate_response(
                 gate, request_id=request_id, actor=actor, role=role, payload=payload
             )
@@ -367,9 +439,7 @@ class OrchestrationService:
                     f"gate {gate.gate_id} invalidated: {resolution.outcome.value}"
                 )
 
-            responded = gate.respond(
-                request_id=request_id, actor=actor, payload=payload, at=now
-            )
+            responded = gate.respond(request_id=request_id, actor=actor, payload=payload, at=now)
             consumed = responded.consume(now)
             final_run = None
             replanned = False
@@ -377,8 +447,7 @@ class OrchestrationService:
                 gate.gate_type is GateType.CONFLICT_RESOLUTION
                 and validated.outcome == "resolved"
                 and gate.continuation is not None
-                and gate.continuation.intent
-                is GateContinuationIntent.REVIEW_RESEARCH_GAP
+                and gate.continuation.intent is GateContinuationIntent.REVIEW_RESEARCH_GAP
             ):
                 # analyze-sufficiency-feedback 7.2/7.3: a "continue research"
                 # continuation runs the SAME shared Focused Replan as ANALYZE
@@ -389,16 +458,16 @@ class OrchestrationService:
                 if terminated:
                     uow.runs.save(final_run, expected_version=original_version)
                 # the focused-replan path already CAS-saved final_run itself
-            elif (
-                gate.gate_type is GateType.PLAN_APPROVAL
-                and validated.outcome == "approved"
-            ):
+            elif gate.gate_type is GateType.PLAN_APPROVAL and validated.outcome == "approved":
                 pending = uow.plans.current(run.run_id)
                 if pending is not None and pending.acceptance is PlanAcceptance.PROPOSED:
                     graph = pending.graph
                     proposal = PlanProposal(
                         run_id=run.run_id,
                         plan_id=graph.plan_id,
+                        schema_version=graph.schema_version,
+                        research_execution_mode=graph.research_execution_mode,
+                        exploration_boundary=graph.exploration_boundary,
                         task_specs=graph.task_specs,
                         dependencies=graph.dependencies,
                         deliverable_paths=graph.deliverable_paths,
@@ -476,9 +545,7 @@ class OrchestrationService:
             base = base.model_copy(update={"goal_clarification": validated.clarification})
         return base
 
-    def _apply_research_gap_continuation(
-        self, uow, run: Run, gate, now
-    ) -> tuple[Run, bool]:
+    def _apply_research_gap_continuation(self, uow, run: Run, gate, now) -> tuple[Run, bool]:
         """CONFLICT_RESOLUTION 'resolved' continuation (tasks 7.2 / 7.3).
 
         Uses the persisted, length-bounded REVIEW feedback as the gap hint for
@@ -494,9 +561,7 @@ class OrchestrationService:
         gap_hint = continuation.feedback
         if run.replan_count >= run.policy.max_replans:
             return run.terminate(TerminationReason.REQUIRED_EVIDENCE_MISSING, now), True
-        builder = FocusedReplanBuilder(
-            self.capability_registry.allowed_kinds(), self.backend.idgen
-        )
+        builder = FocusedReplanBuilder(self.capability_registry.allowed_kinds(), self.backend.idgen)
         focused = builder.build(
             run_id=run.run_id,
             objective=run.effective_goal,

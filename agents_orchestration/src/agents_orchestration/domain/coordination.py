@@ -332,6 +332,7 @@ def build_gate_continuation(
     intent: GateContinuationIntent | None = None,
     feedback: str | None = None,
     correlation_id: str | None = None,
+    artifact_hash: str | None = None,
 ) -> GateContinuation:
     """Construct the version-bound continuation for a Gate opened from ``run``'s
     current phase (task 8.3 / 8.6)."""
@@ -340,6 +341,7 @@ def build_gate_continuation(
         origin_phase=phase.value if phase else run.state.value,
         bound_state_version=run.state_version,
         bound_plan_version=run.current_plan_version,
+        bound_artifact_hash=artifact_hash,
         intent=intent,
         feedback=feedback,
         correlation_id=correlation_id,

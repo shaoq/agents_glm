@@ -17,6 +17,7 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from agents_orchestration.domain.plan import ResearchExecutionMode
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
 
 
@@ -67,7 +68,15 @@ class Settings(BaseSettings):
     max_attempts_per_task: int = Field(default=3, ge=1)
     max_replans: int = Field(default=2, ge=0)
     max_report_revisions: int = Field(default=2, ge=0)
+    max_research_steps_per_seed: int = Field(default=12, ge=1)
+    max_research_directions_per_seed: int = Field(default=6, ge=1)
+    max_research_tokens_per_seed: int = Field(default=100_000, ge=0)
+    max_research_cost_usd_per_seed: float = Field(default=100.0, ge=0)
     run_deadline_seconds: int = Field(default=1800, gt=0)
+
+    # Controls only newly proposed Plans; active Plans consume persisted mode.
+    research_execution_mode: ResearchExecutionMode = ResearchExecutionMode.FIXED_FANOUT
+    research_reasoning_reservation_tokens: int = Field(default=256, ge=1)
 
     def build_limits(self) -> SystemLimits:
         return SystemLimits(
@@ -77,6 +86,10 @@ class Settings(BaseSettings):
             max_attempts_per_task=self.max_attempts_per_task,
             max_replans=self.max_replans,
             max_report_revisions=self.max_report_revisions,
+            max_research_steps_per_seed=self.max_research_steps_per_seed,
+            max_research_directions_per_seed=self.max_research_directions_per_seed,
+            max_research_tokens_per_seed=self.max_research_tokens_per_seed,
+            max_research_cost_usd_per_seed=self.max_research_cost_usd_per_seed,
             default_run_deadline_seconds=self.run_deadline_seconds,
         )
 
@@ -104,6 +117,8 @@ class Settings(BaseSettings):
             "model_normalizer": self.model_normalizer,
             "model_planner": self.model_planner,
             "model_reviewer": self.model_reviewer,
+            "research_execution_mode": self.research_execution_mode.value,
+            "research_reasoning_reservation_tokens": (self.research_reasoning_reservation_tokens),
             "llm_api_key": "***" if self.llm_api_key else "",
         }
 

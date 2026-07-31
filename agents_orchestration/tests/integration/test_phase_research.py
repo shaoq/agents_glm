@@ -18,7 +18,16 @@ from agents_orchestration.domain.enums import (
     WorkerRole,
 )
 from agents_orchestration.domain.execution import Run, Task
+from agents_orchestration.domain.plan import (
+    ExplorationBoundary,
+    Plan,
+    PlanGraph,
+    ResearchExecutionMode,
+    SeedExplorationBoundary,
+    TaskSpec,
+)
 from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+from agents_orchestration.domain.research_loop import ResearchLoop
 from agents_orchestration.orchestration.coordinator import RunCoordinator
 from agents_orchestration.orchestration.phases import ResearchPhaseHandler
 from agents_orchestration.runtime.tick import RuntimeTick, TaskExecutionOutcome, TickReport
@@ -189,6 +198,71 @@ async def test_research_all_succeeded_joins_to_analyzing(backend) -> None:
     assert report.disposition is AdvanceDisposition.PROGRESSED
     assert report.to_state is RunState.ANALYZING
     assert "joined" in report.reason
+
+
+@pytest.mark.integration
+async def test_research_agent_loop_does_not_join_until_every_seed_loop_is_closed(
+    backend,
+) -> None:
+    run = _seed_run(backend, RunState.RESEARCHING)
+    task = _seed_task(
+        backend,
+        run,
+        "r1",
+        WorkerRole.EVIDENCE_RESEARCHER,
+        TaskState.SUCCEEDED,
+    )
+    boundary = ExplorationBoundary(
+        allowed_capabilities=(CapabilityKind.RAG_SEARCH,),
+        seeds=(
+            SeedExplorationBoundary(
+                task_id=task.task_id,
+                required_coverage=(CapabilityKind.RAG_SEARCH,),
+                max_steps=3,
+                max_directions=2,
+            ),
+        ),
+    )
+    plan = Plan(
+        run_id=run.run_id,
+        graph=PlanGraph(
+            plan_id="p1",
+            version=1,
+            research_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+            exploration_boundary=boundary,
+            task_specs=(
+                TaskSpec(
+                    task_id=task.task_id,
+                    worker_role=WorkerRole.EVIDENCE_RESEARCHER,
+                    description="seed",
+                    required_capabilities=(CapabilityKind.RAG_SEARCH,),
+                ),
+            ),
+        ),
+        proposed_at=NOW,
+    )
+    loop = ResearchLoop(
+        loop_id="loop-r1",
+        run_id=run.run_id,
+        plan_version=1,
+        task_id=task.task_id,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    with backend.unit_of_work() as uow:
+        uow.plans.save(plan)
+        uow.research_loops.save(loop, expected_version=None)
+        uow.commit()
+
+    coord = RunCoordinator(
+        backend,
+        {PhaseId.RESEARCH: _research_handler(backend, _FakeTick())},
+    )
+    report = await coord.advance(run.run_id)
+
+    assert report.disposition is AdvanceDisposition.IDLE
+    assert report.to_state is RunState.RESEARCHING
+    assert report.reason == "research-loops-not-closed"
 
 
 @pytest.mark.integration

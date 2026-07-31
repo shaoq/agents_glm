@@ -21,6 +21,12 @@ from agents_orchestration.domain.execution import Attempt, Operation, Run, Task
 from agents_orchestration.domain.goal import CompletionContract, GoalSpec
 from agents_orchestration.domain.lifecycle import Checkpoint, Gate, Lease
 from agents_orchestration.domain.plan import Dependency, Plan
+from agents_orchestration.domain.research_loop import (
+    ResearchDirection,
+    ResearchLoop,
+    ResearchStep,
+    ResearchStepStatus,
+)
 
 
 class StaleVersionError(RuntimeError):
@@ -125,6 +131,35 @@ class OperationRepository(Protocol):
 
 
 @runtime_checkable
+class ResearchLoopRepository(Protocol):
+    def get(self, loop_id: str) -> ResearchLoop | None: ...
+    def for_task(self, run_id: str, plan_version: int, task_id: str) -> ResearchLoop | None: ...
+    def by_run(self, run_id: str, plan_version: int) -> Sequence[ResearchLoop]: ...
+    def save(self, loop: ResearchLoop, expected_version: int | None) -> None: ...
+
+
+@runtime_checkable
+class ResearchDirectionRepository(Protocol):
+    def get(self, direction_id: str) -> ResearchDirection | None: ...
+    def by_loop(self, loop_id: str) -> Sequence[ResearchDirection]: ...
+    def by_focus_hash(self, loop_id: str, focus_hash: str) -> ResearchDirection | None: ...
+    def save(self, direction: ResearchDirection) -> None: ...
+
+
+@runtime_checkable
+class ResearchStepRepository(Protocol):
+    def get(self, step_id: str) -> ResearchStep | None: ...
+    def by_loop(self, loop_id: str) -> Sequence[ResearchStep]: ...
+    def active_for_task(
+        self, run_id: str, plan_version: int, task_id: str
+    ) -> ResearchStep | None: ...
+    def by_logical_key(
+        self, run_id: str, plan_version: int, task_id: str, step_index: int
+    ) -> ResearchStep | None: ...
+    def save(self, step: ResearchStep, expected_status: ResearchStepStatus | None) -> None: ...
+
+
+@runtime_checkable
 class EventStore(Protocol):
     def append(self, events: Sequence[DomainEvent]) -> None: ...
     def stream(
@@ -189,6 +224,9 @@ class UnitOfWork(Protocol):
     events: EventStore
     outbox: Outbox
     operations: OperationRepository
+    research_loops: ResearchLoopRepository
+    research_directions: ResearchDirectionRepository
+    research_steps: ResearchStepRepository
     artifacts: ArtifactStore
     dedup: RequestDedupStore
     evidence: EvidenceStore

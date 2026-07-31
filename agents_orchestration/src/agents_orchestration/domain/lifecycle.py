@@ -121,6 +121,7 @@ class Gate(BaseModel):
     responded_at: datetime | None = None
     consumed_at: datetime | None = None
     continuation: GateContinuation | None = None
+    context: dict[str, object] = Field(default_factory=dict)
 
     @property
     def is_open(self) -> bool:
@@ -166,6 +167,7 @@ class CheckpointKind(StrEnum):
 
     PLAN = "plan"
     BRANCH_RESULT = "branch_result"
+    RESEARCH_STEP = "research_step"
     GATE = "gate"
     RETRY = "retry"
     REPLAN = "replan"

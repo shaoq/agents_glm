@@ -25,6 +25,9 @@ from agents_orchestration.runtime.persistence.repositories import (
     SqliteOutbox,
     SqlitePlanRepository,
     SqliteRequestDedupStore,
+    SqliteResearchDirectionRepository,
+    SqliteResearchLoopRepository,
+    SqliteResearchStepRepository,
     SqliteRunRepository,
     SqliteStageExecutionRepository,
     SqliteTaskRepository,
@@ -51,6 +54,9 @@ class SqliteUnitOfWork:
         self.gates = SqliteGateRepository(self._conn)
         self.checkpoints = SqliteCheckpointRepository(self._conn)
         self.operations = SqliteOperationRepository(self._conn)
+        self.research_loops = SqliteResearchLoopRepository(self._conn)
+        self.research_directions = SqliteResearchDirectionRepository(self._conn)
+        self.research_steps = SqliteResearchStepRepository(self._conn)
         self.events = SqliteEventStore(self._conn)
         self.outbox = SqliteOutbox(self._conn)
         self.artifacts = SqliteArtifactStore(self._conn, backend.artifact_dir)

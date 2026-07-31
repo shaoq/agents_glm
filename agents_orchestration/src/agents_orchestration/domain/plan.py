@@ -17,10 +17,12 @@ the cheap graph invariants used by validation; full validation is in Section 5.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_orchestration.domain.enums import BranchRole, CapabilityKind, WorkerRole
 from agents_orchestration.domain.ids import PlanId, TaskId
@@ -48,6 +50,59 @@ class PlanAcceptance(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
+
+
+class ResearchExecutionMode(StrEnum):
+    """Persisted consumer selected for a research Plan version.
+
+    ``FIXED_FANOUT`` is deliberately the default so Plan JSON written before
+    schema version 1 remains readable with its original semantics.
+    """
+
+    FIXED_FANOUT = "fixed_fanout"
+    AGENT_LOOP = "agent_loop"
+
+
+class SeedExplorationBoundary(BaseModel):
+    """Per-seed limits inside an approved exploration boundary."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    task_id: TaskId
+    required_coverage: tuple[CapabilityKind, ...] = Field(min_length=1)
+    max_steps: int = Field(ge=1)
+    max_directions: int = Field(ge=1)
+    max_tokens: int | None = Field(default=None, ge=0)
+    max_cost_usd: Decimal | None = Field(default=None, ge=Decimal("0"))
+
+
+class ExplorationBoundary(BaseModel):
+    """Versioned, immutable scope approved for adaptive research."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: int = Field(default=1, ge=1)
+    allowed_capabilities: tuple[CapabilityKind, ...] = Field(min_length=1)
+    seeds: tuple[SeedExplorationBoundary, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_seed_limits(self) -> ExplorationBoundary:
+        allowed = set(self.allowed_capabilities)
+        if len(allowed) != len(self.allowed_capabilities):
+            raise ValueError("allowed capabilities must be unique")
+        seed_ids = [seed.task_id for seed in self.seeds]
+        if len(set(seed_ids)) != len(seed_ids):
+            raise ValueError("seed task ids must be unique")
+        for seed in self.seeds:
+            if not set(seed.required_coverage).issubset(allowed):
+                raise ValueError(
+                    f"required coverage for seed {seed.task_id} must be a subset "
+                    "of allowed capabilities"
+                )
+        return self
+
+    def for_seed(self, task_id: TaskId) -> SeedExplorationBoundary | None:
+        return next((seed for seed in self.seeds if seed.task_id == task_id), None)
 
 
 class TaskSpec(BaseModel):
@@ -80,10 +135,22 @@ class PlanGraph(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     plan_id: PlanId
+    schema_version: int = Field(default=1, ge=1)
+    research_execution_mode: ResearchExecutionMode = ResearchExecutionMode.FIXED_FANOUT
+    exploration_boundary: ExplorationBoundary | None = None
     version: int = Field(default=1, ge=1)
     task_specs: tuple[TaskSpec, ...] = Field(default_factory=tuple)
     dependencies: tuple[Dependency, ...] = Field(default_factory=tuple)
     deliverable_paths: tuple[str, ...] = Field(default_factory=tuple)
+
+    @model_validator(mode="after")
+    def _validate_mode_boundary(self) -> PlanGraph:
+        if (
+            self.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+            and self.exploration_boundary is None
+        ):
+            raise ValueError("agent_loop requires exploration_boundary")
+        return self
 
     @property
     def task_ids(self) -> tuple[TaskId, ...]:
@@ -127,6 +194,12 @@ class PlanGraph(BaseModel):
             return False
 
         return any(color[n] == 0 and visit(n) for n in self.task_ids)
+
+    def approval_hash(self) -> str:
+        """Stable hash of the exact seed/mode/boundary candidate being approved."""
+
+        payload = self.model_dump_json(exclude_none=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class Plan(BaseModel):

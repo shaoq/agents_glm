@@ -208,6 +208,17 @@ class EffectType(StrEnum):
     CAPABILITY_INVOKED = "capability_invoked"
     ARTIFACT_RECORDED = "artifact_recorded"
     BUDGET_CONSUMED = "budget_consumed"
+    RESEARCH_LOOP_STARTED = "research_loop_started"
+    RESEARCH_STEP_PREPARED = "research_step_prepared"
+    RESEARCH_ACTION_ACCEPTED = "research_action_accepted"
+    RESEARCH_ACTION_REJECTED = "research_action_rejected"
+    RESEARCH_QUERY_ACCEPTED = "research_query_accepted"
+    RESEARCH_DIRECTION_ADDED = "research_direction_added"
+    RESEARCH_DIRECTION_DEDUPED = "research_direction_deduped"
+    RESEARCH_STOP_REQUESTED = "research_stop_requested"
+    RESEARCH_STOP_REJECTED = "research_stop_rejected"
+    RESEARCH_LOOP_EXHAUSTED = "research_loop_exhausted"
+    RESEARCH_LOOP_COMPLETED = "research_loop_completed"
 
 
 class CapabilityKind(StrEnum):

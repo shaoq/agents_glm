@@ -20,8 +20,8 @@ from agents_orchestration.domain.enums import (
 from agents_orchestration.domain.events import DomainEvent
 from agents_orchestration.domain.execution import Run, Task
 from agents_orchestration.domain.goal import CompletionContract
-from agents_orchestration.domain.plan import Plan, PlanGraph
-from agents_orchestration.domain.policy import RunPolicy, SystemLimits
+from agents_orchestration.domain.plan import Plan, PlanGraph, ResearchExecutionMode
+from agents_orchestration.domain.policy import Budget, RunPolicy, SystemLimits
 from agents_orchestration.orchestration.proposals import PlanProposal
 
 _FIXED_LIFECYCLE_DELIVERABLES = frozenset({"report.md"})
@@ -48,6 +48,7 @@ class PlanValidator:
         allowed_capabilities: frozenset[CapabilityKind],
         completion: CompletionContract,
         version: int = 1,
+        run_budget: Budget | None = None,
     ) -> PlanValidation:
         graph = proposal.to_graph(version)
         diagnostics: list[str] = []
@@ -85,6 +86,14 @@ class PlanValidator:
                     f"dependency references unknown task {dep.predecessor}->{dep.successor}"
                 )
 
+        self._validate_research_mode(
+            graph,
+            diagnostics=diagnostics,
+            policy=policy,
+            allowed_capabilities=allowed_capabilities,
+            run_budget=run_budget,
+        )
+
         produced = {s.deliverable_path for s in graph.task_specs if s.deliverable_path}
         produced |= set(proposal.deliverable_paths)
         for path in completion.deliverable_paths:
@@ -95,6 +104,107 @@ class PlanValidator:
 
         accepted = not diagnostics and graph.task_count > 0
         return PlanValidation(accepted, tuple(diagnostics), graph if accepted else None)
+
+    def _validate_research_mode(
+        self,
+        graph: PlanGraph,
+        *,
+        diagnostics: list[str],
+        policy: RunPolicy,
+        allowed_capabilities: frozenset[CapabilityKind],
+        run_budget: Budget | None,
+    ) -> None:
+        boundary = graph.exploration_boundary
+        if graph.research_execution_mode is ResearchExecutionMode.FIXED_FANOUT:
+            if boundary is not None:
+                diagnostics.append("fixed_fanout Plan must not define an exploration boundary")
+            return
+        if boundary is None:  # PlanGraph normally rejects this; keep the validator defensive.
+            diagnostics.append("agent_loop Plan requires an exploration boundary")
+            return
+
+        boundary_allowed = set(boundary.allowed_capabilities)
+        if not boundary_allowed.issubset(allowed_capabilities):
+            extra = sorted(cap.value for cap in boundary_allowed - allowed_capabilities)
+            diagnostics.append(f"boundary contains unsupported capabilities {extra}")
+
+        task_by_id = {spec.task_id: spec for spec in graph.task_specs}
+        seed_ids = {seed.task_id for seed in boundary.seeds}
+        task_ids = set(task_by_id)
+        if seed_ids != task_ids:
+            diagnostics.append(
+                "seed boundary task ids must exactly match Plan seed Tasks "
+                f"(boundary={sorted(seed_ids)}, tasks={sorted(task_ids)})"
+            )
+
+        total_tokens = 0
+        total_cost = 0
+        token_ceiling_complete = True
+        cost_ceiling_complete = True
+        for seed in boundary.seeds:
+            spec = task_by_id.get(seed.task_id)
+            if spec is not None and not set(spec.required_capabilities).issubset(
+                set(seed.required_coverage)
+            ):
+                diagnostics.append(
+                    f"seed {seed.task_id} required coverage must include Task required capabilities"
+                )
+            if seed.max_steps > policy.max_research_steps_per_seed:
+                diagnostics.append(
+                    f"seed {seed.task_id} max_steps {seed.max_steps} > policy "
+                    f"{policy.max_research_steps_per_seed}"
+                )
+            if seed.max_steps > self.limits.max_research_steps_per_seed:
+                diagnostics.append(
+                    f"seed {seed.task_id} max_steps {seed.max_steps} > system "
+                    f"{self.limits.max_research_steps_per_seed}"
+                )
+            if seed.max_directions > policy.max_research_directions_per_seed:
+                diagnostics.append(
+                    f"seed {seed.task_id} max_directions {seed.max_directions} > policy "
+                    f"{policy.max_research_directions_per_seed}"
+                )
+            if seed.max_directions > self.limits.max_research_directions_per_seed:
+                diagnostics.append(
+                    f"seed {seed.task_id} max_directions {seed.max_directions} > system "
+                    f"{self.limits.max_research_directions_per_seed}"
+                )
+            if seed.max_tokens is None:
+                token_ceiling_complete = False
+            else:
+                total_tokens += seed.max_tokens
+                if seed.max_tokens > policy.max_research_tokens_per_seed:
+                    diagnostics.append(f"seed {seed.task_id} token ceiling exceeds policy")
+                if seed.max_tokens > self.limits.max_research_tokens_per_seed:
+                    diagnostics.append(f"seed {seed.task_id} token ceiling exceeds system limit")
+            if seed.max_cost_usd is None:
+                cost_ceiling_complete = False
+            else:
+                total_cost += seed.max_cost_usd
+                if seed.max_cost_usd > policy.max_research_cost_usd_per_seed:
+                    diagnostics.append(f"seed {seed.task_id} cost ceiling exceeds policy")
+                if seed.max_cost_usd > self.limits.max_research_cost_usd_per_seed:
+                    diagnostics.append(f"seed {seed.task_id} cost ceiling exceeds system limit")
+
+        if run_budget is None:
+            return
+        if run_budget.max_tokens is not None:
+            remaining_tokens = run_budget.max_tokens - run_budget.tokens_used
+            if not token_ceiling_complete:
+                diagnostics.append("finite Run token budget requires every seed token ceiling")
+            elif total_tokens > remaining_tokens:
+                diagnostics.append(
+                    f"seed token ceiling total {total_tokens} exceeds Run remaining "
+                    f"{remaining_tokens}"
+                )
+        if run_budget.max_cost_usd is not None:
+            remaining_cost = run_budget.max_cost_usd - run_budget.cost_usd_used
+            if not cost_ceiling_complete:
+                diagnostics.append("finite Run cost budget requires every seed cost ceiling")
+            elif total_cost > remaining_cost:
+                diagnostics.append(
+                    f"seed cost ceiling total {total_cost} exceeds Run remaining {remaining_cost}"
+                )
 
 
 class PlanAcceptor:

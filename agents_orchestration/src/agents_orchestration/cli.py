@@ -108,7 +108,9 @@ def run_show(run_id: Annotated[str, typer.Argument()]) -> None:
     if run is None:
         typer.echo(_diagnostic(KeyError(run_id)), err=True)
         raise typer.Exit(code=404)
-    typer.echo(run.model_dump_json())
+    payload = run.model_dump(mode="json")
+    payload["research"] = svc.research_status(run_id)
+    typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
 @run_app.command("watch")

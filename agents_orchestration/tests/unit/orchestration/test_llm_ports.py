@@ -7,14 +7,27 @@ import pytest
 from agents_orchestration.adapters.base import ModelProfile
 from agents_orchestration.adapters.model import OpenAIModelAdapter
 from agents_orchestration.domain.capability import CapabilityResult
-from agents_orchestration.domain.enums import FailureCode, ReviewVerdict, WorkerRole
-from agents_orchestration.domain.evidence import EvidenceSet
+from agents_orchestration.domain.enums import (
+    BranchRole,
+    CapabilityKind,
+    FailureCode,
+    ReviewVerdict,
+    WorkerRole,
+)
+from agents_orchestration.domain.evidence import EvidenceSet, Usage
+from agents_orchestration.domain.plan import ResearchExecutionMode
+from agents_orchestration.domain.research_loop import (
+    QueryAction,
+    ResearchDirectionView,
+    ResearchLoopView,
+)
 from agents_orchestration.orchestration.llm_ports import (
     LLMAnalyst,
     LLMGoalNormalizer,
     LLMPlanner,
     LLMReportReviewer,
     LLMReportWriter,
+    LLMResearchAgent,
     LLMResearchProvider,
     PortError,
 )
@@ -87,6 +100,71 @@ async def test_planner_parses_task_specs() -> None:
     assert len(proposal.task_specs) == 2
     assert all(s.worker_role is WorkerRole.EVIDENCE_RESEARCHER for s in proposal.task_specs)
     assert proposal.deliverable_paths == ("report.md",)
+
+
+@pytest.mark.unit
+async def test_planner_agent_loop_emits_boundary_from_seed_hints() -> None:
+    adapter = _FakeAdapter(
+        tool_result=_tool_ok(
+            '{"tasks":[{"task_id":"seed-1","role":"evidence_researcher",'
+            '"description":"gather A","source_hints":["local_knowledge"]}]}',
+            "propose_plan",
+        )
+    )
+    from agents_orchestration.domain.goal import GoalSpec
+
+    proposal = await LLMPlanner(
+        adapter,
+        _Id(),
+        default_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+        max_steps_per_seed=5,
+        max_directions_per_seed=2,
+        max_tokens_per_seed=1_000,
+    ).propose_plan(
+        GoalSpec(raw_input="g", objective="研究X", deliverables=("report.md",)),
+        None,
+        "r1",
+    )
+
+    assert proposal.research_execution_mode is ResearchExecutionMode.AGENT_LOOP
+    assert proposal.exploration_boundary is not None
+    seed = proposal.exploration_boundary.for_seed("seed-1")
+    assert seed.required_coverage == (CapabilityKind.RAG_SEARCH,)
+    assert seed.max_steps == 5
+
+
+@pytest.mark.unit
+async def test_planner_agent_loop_keeps_optional_sources_out_of_required_coverage() -> None:
+    adapter = _FakeAdapter(
+        tool_result=_tool_ok(
+            '{"tasks":[{"task_id":"seed-1","role":"evidence_researcher",'
+            '"description":"gather A",'
+            '"source_hints":["local_knowledge","live_web"]}]}',
+            "propose_plan",
+        )
+    )
+    from agents_orchestration.domain.goal import GoalSpec
+
+    proposal = await LLMPlanner(
+        adapter,
+        _Id(),
+        web_enabled=True,
+        default_execution_mode=ResearchExecutionMode.AGENT_LOOP,
+    ).propose_plan(
+        GoalSpec(raw_input="g", objective="研究X", deliverables=("report.md",)),
+        None,
+        "r1",
+    )
+
+    assert proposal.exploration_boundary is not None
+    assert proposal.exploration_boundary.allowed_capabilities == (
+        CapabilityKind.RAG_SEARCH,
+        CapabilityKind.WEB_RESEARCH,
+    )
+    seed = proposal.exploration_boundary.for_seed("seed-1")
+    assert seed.required_coverage == (CapabilityKind.RAG_SEARCH,)
+    assert proposal.task_specs[0].required_capabilities == (CapabilityKind.RAG_SEARCH,)
+    assert proposal.task_specs[0].branch_role is BranchRole.REQUIRED
 
 
 @pytest.mark.unit
@@ -168,6 +246,45 @@ async def test_research_provider_emits_untrusted_model_evidence() -> None:
     assert evidences[0].is_untrusted is True
     assert evidences[0].source.source_kind.value == "model"
     assert evidences[0].trust == 0.8
+
+
+@pytest.mark.unit
+async def test_research_agent_uses_stable_request_and_parses_typed_action() -> None:
+    adapter = _FakeAdapter(
+        tool_result=CapabilityResult.ok(
+            operation_id="op",
+            data={
+                "arguments": (
+                    '{"action":{"kind":"query","direction_id":"dir-1",'
+                    '"capability_kind":"rag_search","query":"q","rationale":"r"}}'
+                )
+            },
+            usage=Usage(tokens=17),
+        )
+    )
+    view = ResearchLoopView(
+        run_id="r1",
+        plan_version=1,
+        task_id="t1",
+        loop_id="loop-1",
+        step_id="step-1",
+        objective="o",
+        seed="s",
+        directions=(
+            ResearchDirectionView(
+                direction_id="dir-1",
+                text="[UNTRUSTED_DIRECTION] s",
+                capability_scope=(CapabilityKind.RAG_SEARCH,),
+            ),
+        ),
+        remaining_steps=2,
+        remaining_directions=1,
+    )
+
+    decision = await LLMResearchAgent(adapter).decide(view, decision_request_id="decision:stable")
+
+    assert isinstance(decision.action, QueryAction)
+    assert decision.usage.tokens == 17
 
 
 @pytest.mark.unit
