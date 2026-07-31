@@ -32,6 +32,6 @@
 
 - [x] 5.1 Offline unit tests for each port (stubbed LLM returning fixed tool_call JSON): parse success, validation failure → degrade, provider failure → degrade
 - [x] 5.2 Offline integration: full Goal→Plan→Research→Analyze→Write→Review→Finalize with stubbed LLM + evidence persistence
-- [ ] 5.3 Live smoke (`@pytest.mark.smoke`, `ORCH_LIVE_SMOKE=1`): real `glm-5.2` end-to-end, produces a non-empty `report.md` with citations; skipped by default
+- [x] 5.3 Live smoke (`@pytest.mark.smoke`, `ORCH_LIVE_SMOKE=1`): real `glm-5.2` end-to-end, produces a non-empty `report.md` with citations; skipped by default
 - [x] 5.4 Verify default suite makes no network calls; run ruff + full test suite green; coverage threshold met
-- [ ] 5.5 Update README: production usage, `run start` real-report flow, deferred Memory/RAG note, live-smoke enablement
+- [x] 5.5 Update README: production usage, `run start` real-report flow, deferred Memory/RAG note, live-smoke enablement
