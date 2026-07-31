@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "mode": "architecture",
+  "template_type": "architecture",
+  "style": 7,
+  "motion_scene": "token-stream",
+  "quality_profile": "showcase",
+  "width": 960,
+  "height": 700,
+  "title": "agents_rag Write Pipeline",
+  "subtitle": "ingest -> parse -> clean -> parent-child chunk -> embed -> triple-index persist -> registry",
+  "containers": [
+    { "id": "entry", "x": 40, "y": 120, "width": 880, "height": 110, "label": "Ingest & Scan", "stroke": "#e2e8f0", "fill": "none" },
+    { "id": "runtime", "x": 40, "y": 280, "width": 880, "height": 130, "label": "Parse & Transform", "stroke": "#e2e8f0", "fill": "none" },
+    { "id": "delivery", "x": 40, "y": 450, "width": 880, "height": 140, "label": "Persist", "stroke": "#e2e8f0", "fill": "none" }
+  ],
+  "nodes": [
+    { "id": "app", "kind": "rect", "x": 80, "y": 156, "width": 180, "height": 54, "type_label": "ENTRY", "label": "agents-rag ingest", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true },
+    { "id": "sdk", "kind": "double_rect", "x": 370, "y": 156, "width": 220, "height": 54, "type_label": "COLLECT", "label": "Scan + Diff (5-state)", "fill": "#ffffff", "stroke": "#10a37f" },
+    { "id": "prompt", "kind": "rect", "x": 80, "y": 340, "width": 180, "height": 50, "type_label": "PARSE", "label": "ParserRouter + fallback", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true },
+    { "id": "model", "kind": "double_rect", "x": 370, "y": 340, "width": 220, "height": 50, "type_label": "CHUNK", "label": "Normalize + Parent-Child", "fill": "#ffffff", "stroke": "#10a37f" },
+    { "id": "tools", "kind": "rect", "x": 700, "y": 340, "width": 180, "height": 50, "type_label": "EMBED", "label": "Embedder (embedding-3)", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true },
+    { "id": "formatter", "kind": "rect", "x": 80, "y": 510, "width": 180, "height": 60, "type_label": "VECTOR", "label": "ChromaStore upsert", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true },
+    { "id": "observability", "kind": "rect", "x": 390, "y": 510, "width": 180, "height": 60, "type_label": "INDEX", "label": "BM25 + Parent KV", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true },
+    { "id": "release", "kind": "rect", "x": 700, "y": 510, "width": 180, "height": 60, "type_label": "REGISTRY", "label": "Registry (sqlite)", "fill": "#ffffff", "stroke": "#dce5e3", "flat": true }
+  ],
+  "arrows": [
+    { "id": "connect", "source": "app", "target": "sdk", "source_port": "right", "target_port": "left", "flow": "control", "motion_role": "connect", "motion_stage": 1, "motion_order": 0, "label": "ingest" },
+    { "id": "prepare", "source": "sdk", "target": "prompt", "source_port": "bottom", "target_port": "top", "flow": "read", "motion_role": "prepare", "motion_stage": 2, "motion_order": 0, "label": "files" },
+    { "id": "invoke", "source": "prompt", "target": "model", "source_port": "right", "target_port": "left", "flow": "control", "motion_role": "invoke", "motion_stage": 3, "motion_order": 0, "label": "document" },
+    { "id": "tool-call", "source": "model", "target": "tools", "source_port": "right", "target_port": "left", "flow": "read", "motion_role": "tool-call", "motion_stage": 4, "motion_order": 0, "label": "children" },
+    { "id": "stream", "source": "model", "target": "formatter", "source_port": "bottom", "target_port": "top", "flow": "control", "motion_role": "token-stream", "motion_stage": 4, "motion_order": 1, "label": "vectors" },
+    { "id": "measure", "source": "formatter", "target": "observability", "source_port": "right", "target_port": "left", "flow": "feedback", "motion_role": "measure", "motion_stage": 5, "motion_order": 1, "label": "chunk_id" },
+    { "id": "govern", "source": "tools", "target": "release", "source_port": "bottom", "target_port": "top", "flow": "feedback", "motion_role": "govern", "motion_stage": 5, "motion_order": 0, "label": "chunk_ids" },
+    { "id": "promote", "source": "observability", "target": "release", "source_port": "right", "target_port": "left", "flow": "feedback", "motion_role": "promote", "motion_stage": 6, "motion_order": 0, "label": "record" }
+  ],
+  "legend_orientation": "horizontal",
+  "legend_x": 48,
+  "legend_y": 625,
+  "legend_locked": true,
+  "legend": [
+    { "flow": "control", "label": "primary write path" },
+    { "flow": "read", "label": "intermediate artifacts" },
+    { "flow": "feedback", "label": "persist + register" }
+  ],
+  "footer": "Style 7 · OpenAI Official · agents_rag ingestion write pipeline",
+  "footer_x": 48,
+  "footer_y": 680
+}
