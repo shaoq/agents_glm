@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1380" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+<defs>
+<marker id="ab" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#2563eb"/></marker>
+<marker id="ao" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#ea580c"/></marker>
+<marker id="ap" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#7c3aed"/></marker>
+<marker id="ag" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#059669"/></marker>
+</defs>
+<rect width="1280" height="1380" fill="#ffffff"/>
+<text x="640" y="36" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">Run 生命周期状态机（agent_loop + 双层 sufficiency + 双层 Focused Replan）</text>
+<text x="640" y="58" text-anchor="middle" font-size="12" fill="#64748b">蓝=正常推进 · 橙=Gate阻塞 · 紫=回退补研究(Focused Replan+HINT) · 绿=agent_loop · 红虚=回退改报告</text>
+<rect x="450" y="80" width="220" height="40" rx="10" ry="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="560.0" y="104.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">CREATED</text>
+<rect x="450" y="150" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="174.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">NORMALIZING</text>
+<text x="560.0" y="205" text-anchor="middle" font-size="10" fill="#64748b">GoalNormalizer · 模糊→GOAL_CLARIFICATION gate</text>
+<rect x="450" y="220" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="244.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">PLANNING</text>
+<text x="560.0" y="275" text-anchor="middle" font-size="10" fill="#64748b">Planner→seed+ExplorationBoundary · PLAN_APPROVAL gate</text>
+<rect x="380" y="290" width="360" height="270" rx="12" ry="12" fill="#f0fdf4" stroke="#059669" stroke-width="2.5" stroke-dasharray="6,3"/>
+<text x="560" y="312" text-anchor="middle" font-size="15" font-weight="700" fill="#065f46">RESEARCHING ★ agent_loop（多 seed 并行）</text>
+<rect x="400" y="325" width="320" height="36" rx="10" ry="10" fill="#dcfce7" stroke="#059669" stroke-width="2"/>
+<text x="560.0" y="347.0" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">seed_A: ResearchLoop</text>
+<rect x="400" y="370" width="320" height="36" rx="10" ry="10" fill="#dcfce7" stroke="#059669" stroke-width="2"/>
+<text x="560.0" y="392.0" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">seed_B: ResearchLoop</text>
+<text x="560" y="425" text-anchor="middle" font-size="11" fill="#065f46">每 tick 单步（durable ResearchStep: DECIDING→PREPARED→ACCEPTED）</text>
+<text x="430" y="448" text-anchor="start" font-size="11" fill="#065f46">QUERY: router.invoke（单capability,权限守卫）→ evidence→coverage+=cap</text>
+<text x="430" y="466" text-anchor="start" font-size="11" fill="#065f46">ADD_DIRECTION: ResearchDirectionPolicy(sanitize+narrow) → loop-local</text>
+<text x="430" y="484" text-anchor="start" font-size="11" fill="#065f46">STOP_REQUEST: LoopGuard(required_coverage⊆coverage+独立evidence)</text>
+<text x="560" y="506" text-anchor="middle" font-size="10" fill="#059669">所有 seed loop closed → join → EvidenceSet</text>
+<text x="560" y="528" text-anchor="middle" font-size="10" fill="#64748b">围栏: budget/max_steps/sanitize/lease heartbeat · LLM 只选 action</text>
+<rect x="450" y="580" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="604.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">ANALYZING</text>
+<text x="560.0" y="635" text-anchor="middle" font-size="10" fill="#64748b">SufficiencyReviewer L0(结构)+L1(语义)</text>
+<rect x="450" y="650" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="674.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">WRITING</text>
+<text x="560.0" y="705" text-anchor="middle" font-size="10" fill="#64748b">ReportWriter port → Draft</text>
+<rect x="450" y="720" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="744.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">REVIEWING</text>
+<text x="560.0" y="775" text-anchor="middle" font-size="10" fill="#64748b">ReportReviewer → verdict</text>
+<rect x="450" y="790" width="220" height="40" rx="10" ry="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="814.0" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">FINALIZING</text>
+<text x="560.0" y="845" text-anchor="middle" font-size="10" fill="#64748b">CompletionEvaluator+ReportBuilder+Finalizer</text>
+<rect x="360" y="870" width="190" height="42" rx="10" ry="10" fill="#dcfce7" stroke="#059669" stroke-width="2"/>
+<text x="455.0" y="895.0" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">SUCCEEDED</text>
+<rect x="640" y="870" width="190" height="42" rx="10" ry="10" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+<text x="735.0" y="895.0" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">FAILED</text>
+<circle cx="560" cy="60" r="8" fill="#0f172a"/>
+<line x1="560" y1="68" x2="560" y2="80" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="560" y1="120" x2="560" y2="150" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="560" y1="190" x2="560" y2="220" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="568" y="205.0" text-anchor="start" font-size="10" fill="#2563eb">seed+boundary</text>
+<line x1="560" y1="260" x2="560" y2="290" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="560" y1="560" x2="560" y2="580" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="568" y="570.0" text-anchor="start" font-size="10" fill="#2563eb">join ✓</text>
+<line x1="560" y1="620" x2="560" y2="650" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="560" y1="690" x2="560" y2="720" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="560" y1="750" x2="560" y2="790" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="568" y="770.0" text-anchor="start" font-size="10" fill="#2563eb">PASS</text>
+<line x1="560" y1="832" x2="455" y2="870" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="568" y="851.0" text-anchor="start" font-size="10" fill="#2563eb">SATISFIED</text>
+<line x1="560" y1="832" x2="665" y2="870" stroke="#dc2626" stroke-width="2" marker-end="url(#ab)"/>
+<text x="500" y="851.0" text-anchor="start" font-size="10" fill="#dc2626">gap/缺证据</text>
+<line x1="440" y1="600" x2="320" y2="600" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="310" y="600.0" text-anchor="start" font-size="9" fill="#2563eb">SUFFICIENT→WRITING</text>
+<text x="320" y="618" text-anchor="end" font-size="9" fill="#7c3aed">RESEARCH_GAP↓</text>
+<ellipse cx="950" cy="150" rx="140" ry="28" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+<text x="950" y="154" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">GOAL_CLARIFICATION</text>
+<text x="950" y="170" text-anchor="middle" font-size="9" fill="#9a3412">🔒 Gate</text>
+<ellipse cx="950" cy="220" rx="140" ry="28" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+<text x="950" y="224" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">PLAN_APPROVAL</text>
+<text x="950" y="240" text-anchor="middle" font-size="9" fill="#9a3412">🔒 Gate</text>
+<ellipse cx="950" cy="720" rx="140" ry="28" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+<text x="950" y="724" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">CONFLICT_RESOLUTION</text>
+<text x="950" y="740" text-anchor="middle" font-size="9" fill="#9a3412">🔒 Gate</text>
+<line x1="670" y1="150" x2="810" y2="150" stroke="#ea580c" stroke-width="1.6" marker-end="url(#ao)"/>
+<text x="740.0" y="145" text-anchor="middle" font-size="9" fill="#9a3412">模糊</text>
+<line x1="670" y1="220" x2="810" y2="220" stroke="#ea580c" stroke-width="1.6" marker-end="url(#ao)"/>
+<text x="740.0" y="215" text-anchor="middle" font-size="9" fill="#9a3412">需审批</text>
+<line x1="670" y1="720" x2="810" y2="720" stroke="#ea580c" stroke-width="1.6" marker-end="url(#ao)"/>
+<text x="740.0" y="715" text-anchor="middle" font-size="9" fill="#9a3412">RESEARCH_GAP/CONFLICT</text>
+<path d="M 810,140 C 760,110 720,110 670,140" fill="none" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+<text x="740" y="103" text-anchor="middle" font-size="9" fill="#9a3412">clarified</text>
+<path d="M 810,210 C 760,180 720,180 670,210" fill="none" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+<text x="740" y="173" text-anchor="middle" font-size="9" fill="#9a3412">approved/rejected</text>
+<path d="M 440,605 C 250,605 250,420 380,420" fill="none" stroke="#7c3aed" stroke-width="2.2" marker-end="url(#ap)"/>
+<text x="250" y="510" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">macro Focused Replan</text>
+<text x="250" y="526" text-anchor="middle" font-size="9" fill="#7c3aed">plan_v+1 · replan+1</text>
+<text x="250" y="542" text-anchor="middle" font-size="9" fill="#7c3aed">💡HINT: gap_hint</text>
+<path d="M 950,692 C 1150,692 1150,420 740,420" fill="none" stroke="#7c3aed" stroke-width="2.2" marker-end="url(#ap)"/>
+<text x="1150" y="550" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">macro Focused Replan</text>
+<text x="1150" y="566" text-anchor="middle" font-size="9" fill="#7c3aed">resolved · 不消耗replan</text>
+<text x="1150" y="582" text-anchor="middle" font-size="9" fill="#7c3aed">💡HINT: gate feedback</text>
+<path d="M 440,735 C 300,735 300,665 450,665" fill="none" stroke="#9333ea" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#ap)"/>
+<text x="300" y="695" text-anchor="middle" font-size="10" font-weight="600" fill="#9333ea">REVISE(改报告,无HINT)</text>
+<text x="560" y="552" text-anchor="middle" font-size="10" font-weight="600" fill="#059669">micro: ADD_DIRECTION(loop-local, 不动plan_v)</text>
+<text x="80" y="920" font-size="15" font-weight="700" fill="#0f172a">图例</text>
+<line x1="90" y1="948" x2="150" y2="948" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="165" y="953" font-size="12" fill="#0f172a">正常推进（PROGRESSED）</text>
+<rect x="90" y="972" width="56" height="20" rx="5" fill="#f0fdf4" stroke="#059669" stroke-width="1.5"/>
+<text x="165" y="987" font-size="12" fill="#0f172a">★ RESEARCHING = agent_loop（多 seed 并行自主探索）</text>
+<line x1="90" y1="1012" x2="150" y2="1012" stroke="#7c3aed" stroke-width="2" marker-end="url(#ap)"/>
+<text x="165" y="1017" font-size="12" fill="#0f172a">macro Focused Replan（plan_v+1 + 💡HINT → 回 RESEARCHING）</text>
+<line x1="90" y1="1044" x2="150" y2="1044" stroke="#9333ea" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#ap)"/>
+<text x="165" y="1049" font-size="12" fill="#0f172a">REVISE 回退改报告（无 HINT → WRITING）</text>
+<ellipse cx="118" cy="1078" rx="30" ry="13" fill="#ffedd0" stroke="#ea580c" stroke-width="1.5"/>
+<text x="165" y="1083" font-size="12" fill="#0f172a">Gate 阻塞（GOAL/PLAN/CONFLICT · 人 respond）</text>
+<text x="80" y="1118" font-size="12" font-weight="700" fill="#6d28d9">关键设计</text>
+<text x="80" y="1140" font-size="11" fill="#334155">① sufficiency 双层: loop 内 LoopGuard(结构coverage) + ANALYZE sufficiency_reviewer(语义,权威进WRITING)</text>
+<text x="80" y="1160" font-size="11" fill="#334155">② Focused Replan 双层: RESEARCH 内 ADD_DIRECTION(micro,loop-local,不动plan_v) + ANALYZE/REVIEW(macro,plan_v+1)</text>
+<text x="80" y="1180" font-size="11" fill="#334155">③ 多 seed 并行: 每 seed 独立 ResearchLoop + ExplorationBoundary, 跨 seed max_concurrency 并行, 单 seed 内 step 串行</text>
+<text x="80" y="1200" font-size="11" fill="#334155">④ 判定链: RESEARCH(结构底线) → ANALYZE(语义权威) → FINALIZE(契约验收 终态)</text>
+<text x="80" y="1220" font-size="11" fill="#334155">⑤ 围栏保留: 状态机/router/budget/max_steps/sanitize/lease/FINALIZE · 只让渡 RESEARCH 内 action 选择</text>
+<text x="80" y="1240" font-size="11" fill="#334155">⑥ coverage=已查capability类型(非质量) · LoopGuard 防偷懒(必须源各查一次) · 语义充分性在ANALYZE</text>
+<text x="80" y="1268" font-size="10" fill="#64748b">注: fixed_fanout 旧 Plan 兼容(一次性并行, MultiSourceResearchHandler); agent_loop 新 Plan(多步自主探索); mode 是 plan 级持久化不可中途切换</text>
+</svg>

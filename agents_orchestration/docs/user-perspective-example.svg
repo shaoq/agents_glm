@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 1780" font-family="PingFang SC, Heiti SC, Arial Unicode MS, sans-serif">
+<defs>
+<marker id="ab" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#2563eb"/></marker>
+<marker id="ao" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#ea580c"/></marker>
+<marker id="ap" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#7c3aed"/></marker>
+<marker id="ag" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="11" markerHeight="8" orient="auto"><path d="M0,0 L10,3.5 L0,7 Z" fill="#059669"/></marker>
+</defs>
+<rect width="1340" height="1780" fill="#ffffff"/>
+<text x="670" y="40" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">用户视角实例：研究 AI agent 技术演进</text>
+<text x="670" y="64" text-anchor="middle" font-size="12" fill="#64748b">从 run start 到拿到报告的完整流程</text>
+<rect x="30" y="90" width="260" height="80" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+<text x="48" y="112" font-size="13" font-weight="700" fill="#1e40af">用户: run start</text>
+<text x="48" y="130" font-size="10" font-family="PingFang SC" fill="#64748b">提交研究目标</text>
+<text x="48" y="148" font-size="9" font-family="PingFang SC, monospace" fill="#3b82f6">run start --goal</text>
+<text x="48" y="166" font-size="9" font-family="PingFang SC, monospace" fill="#3b82f6">  "AI agent技术演进"</text>
+<rect x="480" y="95" width="320" height="50" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="125" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">NORMALIZING</text>
+<text x="640" y="161" text-anchor="middle" font-size="10" fill="#64748b">GoalNormalizer 理解目标</text>
+<line x1="300" y1="120" x2="480" y2="120" stroke="#2563eb" stroke-width="1.8" marker-end="url(#ab)"/>
+<line x1="640" y1="145" x2="640" y2="190" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="167" text-anchor="start" font-size="10" fill="#2563eb">目标清晰</text>
+<rect x="480" y="190" width="320" height="45" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="217" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">PLANNING</text>
+<text x="640" y="251" text-anchor="middle" font-size="10" fill="#64748b">Planner: seed + Boundary</text>
+<rect x="480" y="255" width="320" height="140" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+<text x="495" y="275" font-size="10" font-weight="700" fill="#334155">Planner 产出:</text>
+<text x="495" y="293" font-size="10" font-weight="400" fill="#475569">seed_A: 近30天技术动态</text>
+<text x="495" y="311" font-size="10" font-weight="400" fill="#64748b">  required: RAG+WEB  max=10</text>
+<text x="495" y="329" font-size="10" font-weight="400" fill="#475569">seed_B: 主流厂商与观点</text>
+<text x="495" y="347" font-size="10" font-weight="400" fill="#64748b">  required: WEB  max=8</text>
+<text x="495" y="365" font-size="10" font-weight="400" fill="#475569">allowed: RAG+WEB+MEMORY</text>
+<text x="495" y="383" font-size="10" font-weight="400" fill="#059669">PlanValidator OK</text>
+<line x1="640" y1="235" x2="640" y2="255" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<line x1="800" y1="213" x2="905" y2="430" stroke="#ea580c" stroke-width="1.6" marker-end="url(#ao)"/>
+<text x="852" y="315" text-anchor="middle" font-size="9" fill="#9a3412">需审批</text>
+<ellipse cx="1050" cy="430" rx="145" ry="32" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+<text x="1050" y="428" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">PLAN_APPROVAL</text>
+<text x="1050" y="446" text-anchor="middle" font-size="9" fill="#c2410c">审批 seed + boundary</text>
+<rect x="30" y="410" width="260" height="80" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+<text x="48" y="432" font-size="13" font-weight="700" fill="#1e40af">用户: gate respond</text>
+<text x="48" y="450" font-size="10" font-family="PingFang SC" fill="#64748b">人审批计划</text>
+<text x="48" y="468" font-size="9" font-family="PingFang SC, monospace" fill="#3b82f6">payload: {approved}</text>
+<text x="48" y="486" font-size="10" font-family="PingFang SC" fill="#64748b">方向+源+预算 OK</text>
+<line x1="300" y1="450" x2="905" y2="430" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ab)"/>
+<text x="590" y="435" text-anchor="middle" font-size="9" fill="#1e40af">approved</text>
+<line x1="640" y1="395" x2="640" y2="500" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="447" text-anchor="start" font-size="10" fill="#2563eb">accepted</text>
+<rect x="440" y="500" width="400" height="340" rx="12" fill="#f0fdf4" stroke="#059669" stroke-width="2.5" stroke-dasharray="6,3"/>
+<text x="640" y="525" text-anchor="middle" font-size="14" font-weight="700" fill="#065f46">RESEARCHING: agent_loop</text>
+<text x="640" y="544" text-anchor="middle" font-size="11" fill="#065f46">seed_A + seed_B 并行 (用户不介入)</text>
+<rect x="455" y="558" width="370" height="265" rx="8" fill="#ffffff" stroke="#86efac" stroke-width="1.5"/>
+<text x="470" y="578" font-size="11" font-weight="700" fill="#065f46">seed_A 探索过程:</text>
+<text x="470" y="598" font-size="10" font-weight="400" fill="#334155">step1: QUERY(RAG) -> E1 提到glm-5</text>
+<text x="470" y="616" font-size="10" font-weight="400" fill="#334155">step2: QUERY(WEB) -> E2 找到数据</text>
+<text x="470" y="634" font-size="9" font-weight="400" fill="#64748b">   coverage = {RAG, WEB}</text>
+<text x="470" y="656" font-size="10" font-weight="600" fill="#7c3aed">step3: ADD_DIRECTION 竞品对比</text>
+<text x="470" y="674" font-size="9" font-weight="400" fill="#64748b">   dirs=1, max=5 OK</text>
+<text x="470" y="696" font-size="10" font-weight="400" fill="#334155">step4: QUERY(WEB) glm vs claude</text>
+<text x="470" y="714" font-size="10" font-weight="400" fill="#334155">step5: QUERY(RAG) 架构演进</text>
+<text x="470" y="736" font-size="10" font-weight="600" fill="#059669">step6: STOP 覆盖充分</text>
+<text x="470" y="754" font-size="9" font-weight="400" fill="#64748b">   LoopGuard: coverage OK</text>
+<text x="470" y="770" font-size="9" font-weight="400" fill="#64748b">   + 独立evidence OK -> 接受</text>
+<text x="470" y="792" font-size="9" font-weight="600" fill="#059669">围栏: router / budget / steps</text>
+<text x="470" y="808" font-size="9" font-weight="400" fill="#64748b">6步/10max  1方向/5max</text>
+<rect x="30" y="600" width="260" height="50" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+<text x="48" y="622" font-size="13" font-weight="700" fill="#1e40af">用户: run watch</text>
+<text x="48" y="640" font-size="10" font-family="PingFang SC" fill="#64748b">看探索进度(可选)</text>
+<text x="48" y="658" font-size="9" font-family="PingFang SC, monospace" fill="#3b82f6">loop/step/coverage</text>
+<line x1="300" y1="625" x2="440" y2="640" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ab)"/>
+<line x1="640" y1="840" x2="640" y2="870" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="855" text-anchor="start" font-size="10" fill="#2563eb">join EvidenceSet</text>
+<rect x="480" y="870" width="320" height="50" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="900" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">ANALYZING</text>
+<text x="640" y="936" text-anchor="middle" font-size="10" fill="#64748b">SufficiencyReviewer 判证据</text>
+<line x1="640" y1="920" x2="640" y2="960" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="940" text-anchor="start" font-size="10" fill="#2563eb">SUFFICIENT</text>
+<rect x="480" y="960" width="320" height="45" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="987" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">WRITING</text>
+<text x="640" y="1021" text-anchor="middle" font-size="10" fill="#64748b">ReportWriter 写报告</text>
+<line x1="640" y1="1005" x2="640" y2="1040" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<rect x="480" y="1040" width="320" height="45" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="1067" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">REVIEWING</text>
+<text x="640" y="1101" text-anchor="middle" font-size="10" fill="#64748b">ReportReviewer 评审</text>
+<line x1="640" y1="1085" x2="640" y2="1120" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="1102" text-anchor="start" font-size="10" fill="#2563eb">PASS</text>
+<rect x="480" y="1120" width="320" height="50" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+<text x="640" y="1150" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">FINALIZING</text>
+<text x="640" y="1186" text-anchor="middle" font-size="10" fill="#64748b">CompletionEvaluator 验收</text>
+<line x1="640" y1="1170" x2="640" y2="1210" stroke="#2563eb" stroke-width="2" marker-end="url(#ab)"/>
+<text x="650" y="1190" text-anchor="start" font-size="10" fill="#2563eb">SATISFIED</text>
+<rect x="480" y="1210" width="320" height="45" rx="10" fill="#dcfce7" stroke="#059669" stroke-width="2"/>
+<text x="640" y="1237" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">SUCCEEDED</text>
+<rect x="900" y="1280" width="380" height="155" rx="10" fill="#f0f9ff" stroke="#0284c7" stroke-width="2"/>
+<text x="920" y="1305" font-size="11" font-weight="700" fill="#0c4a6e">用户拿到:</text>
+<text x="920" y="1323" font-size="11" font-weight="400" fill="#0c4a6e">report.md 报告正文</text>
+<text x="920" y="1341" font-size="11" font-weight="400" fill="#0369a1">  含glm-5趋势/竞品对比/架构</text>
+<text x="920" y="1359" font-size="11" font-weight="400" fill="#0c4a6e">report.json 结构化</text>
+<text x="920" y="1377" font-size="11" font-weight="400" fill="#0c4a6e">run-summary.json 诊断</text>
+<text x="920" y="1395" font-size="11" font-weight="400" fill="#0369a1">  completion=satisfied</text>
+<text x="920" y="1413" font-size="11" font-weight="400" fill="#0369a1">  coverage=RAG+WEB steps=6</text>
+<path d="M 800,1233 C 850,1233 880,1300 900,1320" fill="none" stroke="#0284c7" stroke-width="2" marker-end="url(#ab)"/>
+<text x="860" y="1270" text-anchor="middle" font-size="10" fill="#0284c7">交付</text>
+<rect x="30" y="1300" width="260" height="50" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.8"/>
+<text x="48" y="1322" font-size="13" font-weight="700" fill="#1e40af">用户: artifact export</text>
+<text x="48" y="1340" font-size="10" font-family="PingFang SC" fill="#64748b">查看报告</text>
+<text x="48" y="1358" font-size="9" font-family="PingFang SC, monospace" fill="#3b82f6">artifact export id</text>
+<line x1="300" y1="1325" x2="900" y2="1335" stroke="#0284c7" stroke-width="1.4" stroke-dasharray="4,3" marker-end="url(#ab)"/>
+<text x="30" y="1400" font-size="13" font-weight="700" fill="#64748b">备选路径 (本例未触发)</text>
+<text x="30" y="1422" font-size="10" fill="#64748b">REVIEW REVISE -> 回 WRITING 改报告</text>
+<text x="30" y="1440" font-size="10" fill="#64748b">REVIEW GAP -> CONFLICT gate -> resolve -> RESEARCH</text>
+<text x="30" y="1458" font-size="10" fill="#64748b">ANALYZE 不足 -> 自动 Focused Replan -> RESEARCH</text>
+<text x="30" y="1476" font-size="10" fill="#64748b">超 boundary -> macro Focused Replan (plan+1)</text>
+<text x="30" y="1494" font-size="10" fill="#64748b">GOAL 模糊 -> GOAL_CLARIFICATION -> 澄清</text>
+<text x="30" y="1512" font-size="10" fill="#64748b">FINALIZE 不满足 -> FAILED + 披露</text>
+<rect x="30" y="1550" width="1280" height="210" rx="10" fill="#fafafa" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50" y="1578" font-size="13" font-weight="700" fill="#0f172a">关键设计</text>
+<text x="50" y="1602" font-size="11" fill="#334155">PLAN = 授权契约: seed方向 + Boundary, 人审批后才放行</text>
+<text x="50" y="1624" font-size="11" fill="#334155">RESEARCH = agent_loop: boundary内 QUERY/ADD_DIRECTION/STOP</text>
+<text x="50" y="1646" font-size="11" fill="#334155">判定链: RESEARCH(结构) -> ANALYZE(语义) -> FINALIZE(契约)</text>
+<text x="50" y="1668" font-size="11" fill="#334155">Focused Replan双层: micro(loop内) + macro(plan+1)</text>
+<text x="50" y="1690" font-size="11" fill="#334155">coverage = 已查源类型, LoopGuard防偷懒, 语义在ANALYZE</text>
+<text x="50" y="1722" font-size="10" fill="#64748b">本例: 审批2seed -> 6步发现竞品 -> ANALYZE充分 -> PASS -> SUCCEEDED</text>
+</svg>
